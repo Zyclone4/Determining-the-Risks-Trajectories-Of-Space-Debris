@@ -1,0 +1,18 @@
+# Dependencies
+node_modules/
+env/
+
+# Caches
+.cache/
+__pycache__/
+*.pyc
+
+# Secrets
+.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Existing cloned repo (tracked separately on GitHub)
+Determining-the-Risks-Trajectories-Of-Space-Debris/
