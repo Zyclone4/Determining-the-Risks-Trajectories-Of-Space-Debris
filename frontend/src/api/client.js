@@ -1,72 +1,52 @@
 /**
- * API Client
- * Axios instance configured to communicate with the backend server.
+ * API Client — Axios instance for backend + diagnostics endpoints
  */
-
 import axios from "axios";
 
-const API_BASE_URL =
-  import.meta.env.VITE_API_URL || "http://localhost:5001/api";
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:5001/api";
+const DIAG_BASE = import.meta.env.VITE_DIAG_URL || "http://localhost:8000";
 
-const apiClient = axios.create({
-  baseURL: API_BASE_URL,
-  timeout: 60000, // 60s — some queries (risk scoring) are heavy
-  headers: {
-    "Content-Type": "application/json",
-  },
-});
+const api = axios.create({ baseURL: API_BASE, timeout: 60000, headers: { "Content-Type": "application/json" } });
+const diagApi = axios.create({ baseURL: DIAG_BASE, timeout: 10000 });
 
-// Response interceptor for error logging
-apiClient.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    console.error("[API]", error.response?.status, error.message);
-    return Promise.reject(error);
-  }
-);
+api.interceptors.response.use(r => r, err => { console.error("[API]", err.response?.status, err.message); return Promise.reject(err); });
 
-/**
- * Fetch all debris data (grouped by catalog)
- */
-export async function fetchDebrisData(options = {}) {
+/** Fetch all debris/satellite TLE data grouped by catalog */
+export async function fetchDebrisData(opts = {}) {
   const params = {};
-  if (options.catalog) params.catalog = options.catalog;
-  if (options.refresh) params.refresh = "true";
-
-  const response = await apiClient.get("/debris", { params });
-  return response.data;
+  if (opts.catalog) params.catalog = opts.catalog;
+  if (opts.refresh) params.refresh = "true";
+  return (await api.get("/debris", { params })).data;
 }
 
-/**
- * Fetch trajectory for a single object
- */
-export async function fetchTrajectory(noradId, options = {}) {
+/** Fetch trajectory for a single object */
+export async function fetchTrajectory(noradId, opts = {}) {
   const params = {};
-  if (options.interval) params.interval = options.interval;
-  if (options.duration) params.duration = options.duration;
-
-  const response = await apiClient.get(`/propagate/${noradId}`, { params });
-  return response.data;
+  if (opts.interval) params.interval = opts.interval;
+  if (opts.duration) params.duration = opts.duration;
+  return (await api.get(`/propagate/${noradId}`, { params })).data;
 }
 
-/**
- * Fetch risk-scored objects
- */
-export async function fetchRisks(options = {}) {
+/** Fetch risk-scored objects */
+export async function fetchRisks(opts = {}) {
   const params = {};
-  if (options.limit) params.limit = options.limit;
-  if (options.minRisk) params.minRisk = options.minRisk;
-
-  const response = await apiClient.get("/risks", { params });
-  return response.data;
+  if (opts.limit) params.limit = opts.limit;
+  if (opts.minRisk) params.minRisk = opts.minRisk;
+  return (await api.get("/risks", { params })).data;
 }
 
-/**
- * Health check
- */
+/** Health check */
 export async function checkHealth() {
-  const response = await apiClient.get("/health");
-  return response.data;
+  return (await api.get("/health")).data;
 }
 
-export default apiClient;
+/** Fetch model diagnostics (GRU / RF) from FastAPI */
+export async function fetchModelDiagnostics() {
+  try {
+    return (await diagApi.get("/model-diagnostics")).data;
+  } catch {
+    return null;
+  }
+}
+
+export default api;

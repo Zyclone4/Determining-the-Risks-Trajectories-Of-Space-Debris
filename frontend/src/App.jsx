@@ -1,256 +1,257 @@
 /**
- * App — Main layout for the Space Debris Dashboard
+ * App — Orbital Debris Watch Dashboard
  *
- * Layout: Sidebar | Globe (center) | Right panel (Risk + Detail)
- * Fetches debris data on mount, computes risk scores, and manages state.
+ * Master layout: Header → StatBoxes → CriticalBanner → Globe/Sidebar → Diagnostics → Table
  */
-
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import Header from "./components/Header";
+import StatBoxes from "./components/StatBoxes";
 import Globe from "./components/Globe";
-import Sidebar from "./components/Sidebar";
-import RiskPanel from "./components/RiskPanel";
-import ObjectDetail from "./components/ObjectDetail";
-import { fetchDebrisData, fetchRisks, fetchTrajectory, checkHealth } from "./api/client";
+import TogglePanel from "./components/TogglePanel";
+import OrbitDistribution from "./components/OrbitDistribution";
+import SourceGroups from "./components/SourceGroups";
+import GRUDiagnosticsPanel from "./components/GRUDiagnosticsPanel";
+import RFDiagnosticsPanel from "./components/RFDiagnosticsPanel";
+import TrackedObjectsTable from "./components/TrackedObjectsTable";
+import ObjectDetailModal from "./components/ObjectDetailModal";
+import CriticalWarningBanner from "./components/CriticalWarningBanner";
+import { fetchDebrisData, fetchRisks, fetchTrajectory, checkHealth, fetchModelDiagnostics } from "./api/client";
 import "./App.css";
 
+// Default toggles
+const DEFAULT_TOGGLES = {
+  top50: true, grid: false, ellipses: false, velocity: false,
+  activeSats: true, debris: true, conjunctions: true,
+};
+
+// Source group color map
+const SOURCE_COLORS = {
+  cosmos2251: "#f85149",
+  iridium33: "#d29922",
+  activeSatellites: "#388bfd",
+  fengyun1c: "#8b5cf6",
+  analystObjects: "#6e7681",
+};
+
 function App() {
-  // Data state
+  // ── Data state ──
   const [debrisData, setDebrisData] = useState(null);
   const [riskData, setRiskData] = useState(null);
+  const [diagData, setDiagData] = useState(null);
   const [selectedObject, setSelectedObject] = useState(null);
   const [trajectoryPoints, setTrajectoryPoints] = useState([]);
+  const [dismissedBanner, setDismissedBanner] = useState(false);
 
-  // UI state
-  const [isLoadingDebris, setIsLoadingDebris] = useState(false);
-  const [isLoadingRisks, setIsLoadingRisks] = useState(false);
+  // ── UI state ──
+  const [isLoading, setIsLoading] = useState(false);
   const [backendOnline, setBackendOnline] = useState(false);
+  const [lastUpdate, setLastUpdate] = useState(null);
   const [error, setError] = useState(null);
+  const [toggles, setToggles] = useState(DEFAULT_TOGGLES);
 
-  // Filters
-  const [searchQuery, setSearchQuery] = useState("");
-  const [activeCatalogs, setActiveCatalogs] = useState({
-    activeSatellites: true,
-    fengyun1c: true,
-    cosmos2251: true,
-    iridium33: true,
-    analystObjects: true,
-  });
-  const [riskFilters, setRiskFilters] = useState({
-    critical: true,
-    warning: true,
-    caution: true,
-    nominal: true,
-  });
-
-  // Health check on mount
+  // ── Health check ──
   useEffect(() => {
     checkHealth()
-      .then(() => setBackendOnline(true))
+      .then(data => { setBackendOnline(true); setLastUpdate(data.timestamp); })
       .catch(() => setBackendOnline(false));
   }, []);
 
-  // Fetch debris data
-  const loadDebrisData = useCallback(async () => {
-    setIsLoadingDebris(true);
+  // ── Fetch diagnostics on mount ──
+  useEffect(() => {
+    fetchModelDiagnostics().then(d => { if (d) setDiagData(d); });
+  }, []);
+
+  // ── Analyze handler ──
+  const handleAnalyze = useCallback(async () => {
+    setIsLoading(true);
     setError(null);
+    setDismissedBanner(false);
     try {
-      const data = await fetchDebrisData();
-      setDebrisData(data);
+      const [debris, risks] = await Promise.all([
+        fetchDebrisData(),
+        fetchRisks({ limit: 1000 }),
+      ]);
+      setDebrisData(debris);
+      setRiskData(risks);
+      setLastUpdate(new Date().toISOString());
     } catch (err) {
-      setError(`Failed to load debris data: ${err.message}`);
+      setError(`Failed to load data: ${err.message}`);
     } finally {
-      setIsLoadingDebris(false);
+      setIsLoading(false);
     }
   }, []);
 
-  // Fetch risk data
-  const loadRiskData = useCallback(async () => {
-    setIsLoadingRisks(true);
-    try {
-      const data = await fetchRisks({ limit: 100 });
-      setRiskData(data);
-    } catch (err) {
-      console.error("Risk loading error:", err);
-    } finally {
-      setIsLoadingRisks(false);
-    }
-  }, []);
-
-  // Select an object and load its trajectory
+  // ── Select object ──
   const handleSelectObject = useCallback(async (noradId) => {
-    // Find the object in risk data
-    const obj = riskData?.risks?.find(
-      (r) => String(r.noradId) === String(noradId)
-    );
+    const obj = riskData?.risks?.find(r => String(r.noradId) === String(noradId));
     setSelectedObject(obj || { noradId });
-
-    // Fetch trajectory
     try {
-      const traj = await fetchTrajectory(noradId);
+      const traj = await fetchTrajectory(noradId, { duration: 2880, interval: 5 });
       setTrajectoryPoints(traj.trajectoryPoints || []);
-    } catch (err) {
-      console.error("Trajectory error:", err);
+    } catch {
       setTrajectoryPoints([]);
     }
   }, [riskData]);
 
-  // Toggle catalog visibility
-  const handleToggleCatalog = useCallback((key) => {
-    setActiveCatalogs((prev) => ({ ...prev, [key]: !prev[key] }));
+  // ── Toggle handler ──
+  const handleToggle = useCallback((key, val) => {
+    setToggles(prev => ({ ...prev, [key]: val }));
   }, []);
 
-  // Toggle risk filter
-  const handleToggleRiskFilter = useCallback((key) => {
-    setRiskFilters((prev) => ({ ...prev, [key]: !prev[key] }));
-  }, []);
+  // ── Derived data ──
+  const allRisks = riskData?.risks || [];
 
-  // Filter objects for the globe
-  const globeObjects = (() => {
-    if (!riskData?.risks) return [];
+  // Source groups from debris data
+  const sourceGroups = useMemo(() => {
+    if (!debrisData?.summary) return [];
+    return Object.entries(debrisData.summary).map(([key, val]) => ({
+      key,
+      label: val.label || key,
+      count: val.count || 0,
+      color: SOURCE_COLORS[key] || "#8b949e",
+    }));
+  }, [debrisData]);
 
-    return riskData.risks.filter((obj) => {
-      // Risk level filter
-      if (obj.riskLevel && riskFilters[obj.riskLevel] === false) return false;
+  // Globe objects (filtered by toggles)
+  const globeObjects = useMemo(() => {
+    let items = [...allRisks];
+    if (toggles.top50) {
+      items = items.sort((a, b) => (b.riskScore ?? 0) - (a.riskScore ?? 0)).slice(0, 50);
+    }
+    return items;
+  }, [allRisks, toggles.top50]);
 
-      // Search filter
-      if (searchQuery) {
-        const q = searchQuery.toLowerCase();
-        const nameMatch = obj.name?.toLowerCase().includes(q);
-        const idMatch = String(obj.noradId).includes(q);
-        if (!nameMatch && !idMatch) return false;
-      }
+  // Critical object for banner
+  const criticalObj = useMemo(() => {
+    if (!allRisks.length) return null;
+    const top = allRisks.reduce((a, b) => ((a.riskScore ?? 0) > (b.riskScore ?? 0) ? a : b), allRisks[0]);
+    return (top.riskScore ?? 0) >= 0.90 ? top : null;
+  }, [allRisks]);
 
-      return true;
-    });
-  })();
-
-  // Filtered risks for the panel
-  const filteredRisks = (() => {
-    if (!riskData?.risks) return [];
-
-    return riskData.risks.filter((obj) => {
-      if (obj.riskLevel && riskFilters[obj.riskLevel] === false) return false;
-      if (searchQuery) {
-        const q = searchQuery.toLowerCase();
-        const nameMatch = obj.name?.toLowerCase().includes(q);
-        const idMatch = String(obj.noradId).includes(q);
-        if (!nameMatch && !idMatch) return false;
-      }
-      return true;
-    });
-  })();
-
-  // Summary for sidebar
-  const summary = debrisData?.summary || {};
+  const totalActive = riskData?.totalSatellitesUsed || 0;
+  const totalDebris = riskData?.totalDebrisAnalyzed || 0;
 
   return (
     <div className="app">
-      {/* Left Sidebar */}
-      <Sidebar
-        activeCatalogs={activeCatalogs}
-        onToggleCatalog={handleToggleCatalog}
-        searchQuery={searchQuery}
-        onSearchChange={setSearchQuery}
-        riskFilters={riskFilters}
-        onToggleRiskFilter={handleToggleRiskFilter}
-        summary={summary}
-        isLoading={isLoadingDebris}
+      {/* ── Header ── */}
+      <Header
+        backendOnline={backendOnline}
+        lastUpdate={lastUpdate}
+        onAnalyze={handleAnalyze}
+        isLoading={isLoading}
       />
 
-      {/* Center: Globe */}
-      <main className="app__main">
-        {/* Top bar */}
-        <div className="app__topbar">
-          <div className="app__topbar-left">
-            <span
-              className={`app__status-dot ${backendOnline ? "online" : "offline"}`}
+      {/* ── Stat Boxes ── */}
+      <StatBoxes
+        risks={allRisks}
+        totalActive={totalActive}
+        totalDebris={totalDebris}
+      />
+
+      {/* ── Critical Warning Banner ── */}
+      {criticalObj && !dismissedBanner && (
+        <CriticalWarningBanner
+          noradId={criticalObj.noradId}
+          name={criticalObj.name}
+          riskScore={criticalObj.riskScore ?? 0}
+          countdownSeconds={1080}
+          approachAlt={criticalObj.position?.geodetic?.altitude?.toFixed?.(0)}
+          missDistance={criticalObj.closestApproach?.toFixed?.(1)}
+          relVelocity={criticalObj.relVelocity?.toFixed?.(2)}
+          inclination={criticalObj.inclination?.toFixed?.(2)}
+          group={criticalObj.catalog}
+          perigee={criticalObj.perigee?.toFixed?.(0)}
+          apogee={criticalObj.apogee?.toFixed?.(0)}
+          shellDensity={criticalObj.shellDensity}
+          riskBasis={criticalObj.riskBasis}
+          onDismiss={() => setDismissedBanner(true)}
+        />
+      )}
+
+      {/* ── Error Banner ── */}
+      {error && <div className="error-banner fade-in">⚠️ {error}</div>}
+
+      {/* ── Main Dashboard Grid ── */}
+      <div className="dashboard">
+        {/* Globe */}
+        <div className="dashboard__globe">
+          <div style={{ position: "relative" }}>
+            <Globe
+              objects={globeObjects}
+              trajectoryPoints={trajectoryPoints}
+              selectedObjectId={selectedObject?.noradId}
+              selectedObjectName={selectedObject?.name}
+              onSelectObject={handleSelectObject}
+              showGrid={toggles.grid}
             />
-            <span className="app__status-text">
-              {backendOnline ? "API Connected" : "API Offline"}
-            </span>
-          </div>
-          <div className="app__topbar-actions">
-            <button
-              className="btn btn-primary"
-              onClick={() => {
-                loadDebrisData();
-                loadRiskData();
-              }}
-              disabled={isLoadingDebris || isLoadingRisks}
-            >
-              {isLoadingDebris || isLoadingRisks ? (
-                <>
-                  <span className="spinner" style={{ width: 14, height: 14 }} />
-                  Loading…
-                </>
-              ) : (
-                "🔄 Fetch Data"
-              )}
-            </button>
+
+            {/* Overlay prompt when no data */}
+            {!riskData && !isLoading && (
+              <div className="globe-overlay">
+                <div className="globe-prompt glass-card">
+                  <h2>🛰️ Space Debris Dashboard</h2>
+                  <p>Click <strong>Analyze Orbits</strong> to load orbital data from Space-Track.org and begin risk analysis.</p>
+                  <button className="btn btn-primary" onClick={handleAnalyze}>🚀 Analyze Orbits</button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Error banner */}
-        {error && (
-          <div className="app__error fade-in">
-            ⚠️ {error}
-          </div>
-        )}
-
-        {/* Globe viewport */}
-        <div className="app__globe">
-          <Globe
-            objects={globeObjects}
-            trajectoryPoints={trajectoryPoints}
-            selectedObjectId={selectedObject?.noradId}
-            onSelectObject={handleSelectObject}
+        {/* Sidebar (toggles, orbit dist, source groups, detail) */}
+        <div className="dashboard__sidebar">
+          <TogglePanel
+            toggles={toggles}
+            onToggle={handleToggle}
+            sourceGroups={sourceGroups.map(sg => ({
+              key: sg.key,
+              label: sg.label,
+            }))}
           />
-
-          {/* Overlay: prompt to fetch */}
-          {!riskData && !isLoadingRisks && (
-            <div className="app__globe-overlay fade-in">
-              <div className="app__globe-prompt glass-card">
-                <h2>🛰️ Space Debris Dashboard</h2>
-                <p>
-                  Click <strong>Fetch Data</strong> to load orbital data from
-                  Space-Track.org and begin risk analysis.
-                </p>
-                <button
-                  className="btn btn-primary"
-                  onClick={() => {
-                    loadDebrisData();
-                    loadRiskData();
-                  }}
-                >
-                  🚀 Fetch Data
-                </button>
-              </div>
-            </div>
+          <OrbitDistribution risks={allRisks} />
+          <SourceGroups groups={sourceGroups} />
+          {selectedObject && (
+            <ObjectDetailModal
+              object={selectedObject}
+              onClose={() => { setSelectedObject(null); setTrajectoryPoints([]); }}
+            />
           )}
         </div>
-      </main>
 
-      {/* Right Panel */}
-      <div className="app__right-panel">
-        {selectedObject ? (
-          <ObjectDetail
-            object={selectedObject}
-            trajectory={trajectoryPoints}
-            onClose={() => {
-              setSelectedObject(null);
-              setTrajectoryPoints([]);
-            }}
-          />
-        ) : (
-          <RiskPanel
-            risks={filteredRisks}
-            isLoading={isLoadingRisks}
-            onSelectObject={handleSelectObject}
-            selectedObjectId={selectedObject?.noradId}
-            totalDebris={riskData?.totalDebrisAnalyzed || 0}
-            totalSatellites={riskData?.totalSatellitesUsed || 0}
-          />
+        {/* ── Diagnostics Section ── */}
+        {diagData && (
+          <div className="dashboard__diagnostics">
+            <div className="diag-section">
+              {/* GRU panel always shown if data exists */}
+              {diagData.gru && (
+                <GRUDiagnosticsPanel
+                  gru={diagData.gru}
+                  split={diagData.split}
+                  accepted={diagData.accepted}
+                  acceptanceReason={diagData.acceptance_reason}
+                />
+              )}
+              {/* RF panel ONLY if chosen_model === "RandomForest" AND rf !== null */}
+              {diagData.chosen_model === "RandomForest" && diagData.rf !== null && (
+                <RFDiagnosticsPanel
+                  rf={diagData.rf}
+                  split={diagData.split}
+                  accepted={diagData.accepted}
+                  acceptanceReason={diagData.acceptance_reason}
+                />
+              )}
+            </div>
+          </div>
         )}
+
+        {/* ── Tracked Objects Table ── */}
+        <div className="dashboard__table">
+          <TrackedObjectsTable
+            risks={allRisks}
+            selectedId={selectedObject?.noradId}
+            onSelectObject={handleSelectObject}
+          />
+        </div>
       </div>
     </div>
   );
