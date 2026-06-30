@@ -1,0 +1,153 @@
+/* =============================================
+   App Layout Styles
+   Three-column layout: Sidebar | Globe | Right Panel
+   ============================================= */
+
+.app {
+  display: flex;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  gap: var(--space-md);
+  padding: var(--space-md);
+}
+
+/* ── Main (center column) ── */
+.app__main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  min-width: 0;
+}
+
+/* ── Top bar ── */
+.app__topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-sm) var(--space-md);
+  background: var(--color-bg-glass);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+
+.app__topbar-left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.app__status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.app__status-dot.online {
+  background: var(--color-risk-nominal);
+  box-shadow: 0 0 8px var(--color-risk-nominal);
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+.app__status-dot.offline {
+  background: var(--color-risk-critical);
+  box-shadow: 0 0 8px var(--color-risk-critical);
+}
+
+.app__status-text {
+  font-size: 0.78rem;
+  color: var(--color-text-secondary);
+}
+
+.app__topbar-actions {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+/* ── Error ── */
+.app__error {
+  padding: var(--space-sm) var(--space-md);
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: var(--radius-md);
+  color: var(--color-risk-critical);
+  font-size: 0.82rem;
+}
+
+/* ── Globe viewport ── */
+.app__globe {
+  flex: 1;
+  position: relative;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-card);
+}
+
+/* ── Globe overlay (fetch prompt) ── */
+.app__globe-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  pointer-events: none;
+}
+
+.app__globe-prompt {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-2xl);
+  text-align: center;
+  max-width: 380px;
+  pointer-events: auto;
+}
+
+.app__globe-prompt h2 {
+  font-size: 1.4rem;
+  font-weight: 700;
+  background: linear-gradient(135deg, var(--color-accent-cyan), var(--color-accent-blue), var(--color-accent-purple));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.app__globe-prompt p {
+  font-size: 0.88rem;
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+}
+
+/* ── Right panel ── */
+.app__right-panel {
+  width: 320px;
+  min-width: 320px;
+  height: 100%;
+}
+
+/* ── Responsive adjustments ── */
+@media (max-width: 1200px) {
+  .app__right-panel {
+    width: 280px;
+    min-width: 280px;
+  }
+}
+
+@media (max-width: 900px) {
+  .app {
+    flex-direction: column;
+  }
+
+  .app__right-panel {
+    width: 100%;
+    min-width: auto;
+    max-height: 300px;
+  }
+}
