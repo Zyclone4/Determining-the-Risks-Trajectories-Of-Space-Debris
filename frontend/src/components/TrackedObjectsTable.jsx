@@ -114,7 +114,7 @@ export default function TrackedObjectsTable({ risks = [], onSelectObject, select
                   <td>
                     <span className={`pill ${rl.cls}`}>{(r.riskScore ?? 0).toFixed(3)}</span>
                   </td>
-                  <td className="mono">{r.closestApproach != null ? `${r.closestApproach.toFixed(1)} km` : "—"}</td>
+                  <td className="mono">{r.closestApproach != null ? Number(r.closestApproach).toFixed(2) : 'N/A'} km</td>
                   <td className="mono">{(r.position?.geodetic?.altitude ?? r.altitude ?? 0).toFixed(0)}</td>
                 </tr>
               );
