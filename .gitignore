@@ -1,18 +1,49 @@
 # Dependencies
 node_modules/
 env/
+.venv/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
 
 # Caches
 .cache/
-__pycache__/
-*.pyc
+backend/.cache/
 
 # Secrets
 .env
+backend/.env
+frontend/.env
+
+# Build output
+dist/
+dist-ssr/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
 # OS
 .DS_Store
 Thumbs.db
 
-# Existing cloned repo (tracked separately on GitHub)
-Determining-the-Risks-Trajectories-Of-Space-Debris/
+# Editor
+.vscode/*
+!.vscode/extensions.json
+.idea
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+*.local
+
+# Model artifacts (large files)
+backend/*.pth
+backend/*.pkl

@@ -3,7 +3,7 @@
  */
 import axios from "axios";
 
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:5001/api";
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000/api";
 const DIAG_BASE = import.meta.env.VITE_DIAG_URL || "http://localhost:8000";
 
 const api = axios.create({ baseURL: API_BASE, timeout: 60000, headers: { "Content-Type": "application/json" } });

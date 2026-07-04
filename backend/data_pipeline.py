@@ -447,7 +447,7 @@ def propagate_all(records, t0=None, horizon_hours=HORIZON_HOURS,
 
 def _nearest_approach_kdtree(all_pos):
     n_obj, n_steps, _ = all_pos.shape
-    min_dist = np.full(n_obj, np.inf)
+    min_dist = np.full(n_obj, 1e50)
 
     for t in range(n_steps):
         pts = all_pos[:, t, :]
@@ -462,7 +462,7 @@ def _nearest_approach_kdtree(all_pos):
         nearest = dd[:, 1]
         min_dist[valid_idx] = np.minimum(min_dist[valid_idx], nearest)
 
-    min_dist[np.isinf(min_dist)] = np.nan
+    min_dist[min_dist >= 1e50] = np.nan
     return min_dist
 
 
@@ -484,11 +484,20 @@ def compute_features(records, norad_ids, all_pos, all_vel):
 
     radii = np.sqrt(np.nansum(all_pos ** 2, axis=2))
     altitudes = radii - EARTH_RADIUS_KM
+    # Mask physically impossible altitudes (below surface or above 50,000 km)
+    invalid = (altitudes < 0) | (altitudes > 50000)
+    altitudes[invalid] = np.nan
+    all_pos[invalid] = np.nan
+    all_vel[invalid] = np.nan
 
     logger.info("Computing nearest approach via KD-Tree (%d steps)...", n_steps)
     nearest_approach = _nearest_approach_kdtree(all_pos)
 
-    min_altitude = np.nanmin(altitudes, axis=1)
+    min_altitude = np.where(
+    np.all(np.isnan(altitudes), axis=1),
+    np.nan,
+    np.nanmin(altitudes, axis=1)
+    )
 
     mean_alt = np.nanmean(altitudes, axis=1)
     logger.info("Computing orbital shell density (±%d km)...", SHELL_BAND_KM)
@@ -569,6 +578,8 @@ def build_and_save_dataset(
         "debris_status": np.repeat(debris_status, n_steps),
         "decay_rate": np.repeat(decay_rate, n_steps),
     })
+
+    df = df[df["min_altitude"].notna() & df["nearest_approach"].notna()].copy()
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     df.to_parquet(output_path, engine="pyarrow", compression="snappy", index=False)

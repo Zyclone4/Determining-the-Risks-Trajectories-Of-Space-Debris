@@ -492,17 +492,10 @@ def extract_rf_features(df):
 
 
 def construct_labels(feat_df):
-    """
-    Labeling rules (applied per object):
-        Critical — perigee_alt_km < 600  AND  shell_density > 10
-        Watch    — perigee_alt_km < 800  OR   shell_density > 5
-                   (evaluated only if Critical condition is not met)
-        Safe     — all other objects
-    """
     def _label(row):
-        if row["perigee_alt_km"] < 600 and row["shell_density"] > 10:
+        if row["perigee_alt_km"] < 400:
             return "Critical"
-        if row["perigee_alt_km"] < 800 or row["shell_density"] > 5:
+        if row["perigee_alt_km"] < 650:
             return "Watch"
         return "Safe"
 
@@ -806,6 +799,13 @@ def create_app():
         allow_headers=["*"],
     )
 
+    def _load_name_map():
+        tle_path = CACHE_DIR / "tle_raw.json"
+        if not tle_path.exists():
+            return {}
+        records = json.loads(tle_path.read_text())
+        return {int(r["NORAD_CAT_ID"]): r.get("OBJECT_NAME", "UNKNOWN") for r in records}
+
     @app.get("/model-diagnostics")
     async def model_diagnostics():
         diag_path = MODEL_DIR / "diagnostics.json"
@@ -817,9 +817,76 @@ def create_app():
         with open(diag_path) as f:
             return json.load(f)
 
+    @app.get("/api/health")
+    async def health():
+        df = pd.read_parquet(PARQUET_INPUT)
+        return {"status": "ok", "objects": len(df.drop_duplicates(subset="NORAD_CAT_ID"))}
+
+    @app.get("/api/risks")
+    async def risks(limit: int = 1000, minRisk: float = 0.0):
+        df = pd.read_parquet(PARQUET_INPUT)
+        obj = df.drop_duplicates(subset="NORAD_CAT_ID").copy()
+        obj = obj.dropna(subset=["min_altitude", "nearest_approach"])
+        name_map = _load_name_map()
+        scored = []
+        for _, row in obj.iterrows():
+            norad = int(row["NORAD_CAT_ID"])
+            name = name_map.get(norad, "UNKNOWN")
+            risk = round(float(row["decay_rate"]) * 100, 4) if not pd.isna(row["decay_rate"]) else 0.0
+            if risk < minRisk:
+                continue
+            if row["min_altitude"] < 400:
+                label = "Critical"
+            elif row["min_altitude"] < 650:
+                label = "Watch"
+            else:
+                label = "Safe"
+            scored.append({
+                "noradId": norad,
+                "name": name,
+                "riskScore": risk,
+                "riskLabel": label,
+                "perigee": round(float(row["min_altitude"]), 1) if not pd.isna(row["min_altitude"]) else 0.0,
+"apogee": round(float(row["min_altitude"]), 1) if not pd.isna(row["min_altitude"]) else 0.0,
+"inclination": 0.0,
+"shellDensity": int(row["shell_density"]) if not pd.isna(row["shell_density"]) else 0,
+"closestApproach": round(float(row["nearest_approach"]), 2) if not pd.isna(row["nearest_approach"]) else 0.0,
+                "objectType": "Debris",
+                "source": name,
+            })
+        scored.sort(key=lambda x: x["riskScore"], reverse=True)
+        cosmos_count = len([s for s in scored if "COSMOS" in s["name"]])
+        iridium_count = len([s for s in scored if "IRIDIUM" in s["name"]])
+        return {
+            "risks": scored[:limit],
+            "total": len(scored),
+            "totalDebrisAnalyzed": len(scored),
+            "totalSatellitesUsed": 0,
+            "resultsReturned": min(limit, len(scored)),
+            "cosmos2251Count": cosmos_count,
+            "iridium33Count": iridium_count,
+        }
+
+    @app.get("/api/debris")
+    async def debris():
+        df = pd.read_parquet(PARQUET_INPUT)
+        obj = df.drop_duplicates(subset="NORAD_CAT_ID").copy()
+        obj = obj.dropna(subset=["min_altitude", "nearest_approach"])
+        name_map = _load_name_map()
+        cosmos_ids = [k for k, v in name_map.items() if "COSMOS" in v]
+        iridium_ids = [k for k, v in name_map.items() if "IRIDIUM" in v]
+        cosmos = obj[obj["NORAD_CAT_ID"].isin(cosmos_ids)]
+        iridium = obj[obj["NORAD_CAT_ID"].isin(iridium_ids)]
+        return {
+            "summary": {
+                "cosmos2251": {"label": "Cosmos 2251 Debris", "count": len(cosmos)},
+                "iridium33":  {"label": "Iridium 33 Debris",  "count": len(iridium)},
+                "total":      {"label": "Total Objects",       "count": len(obj)},
+            },
+            "total": len(obj)
+        }
+
     return app
-
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # CLI
 # ═══════════════════════════════════════════════════════════════════════════════
