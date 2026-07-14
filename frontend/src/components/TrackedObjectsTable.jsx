@@ -14,6 +14,8 @@ export default function TrackedObjectsTable({ risks = [], onSelectObject, select
   const [riskFilter, setRiskFilter] = useState("all");
   const [altFilter, setAltFilter] = useState("all");
   const [catFilter, setCatFilter] = useState("all");
+  const [sortCol, setSortCol] = useState("riskScore");
+  const [sortDir, setSortDir] = useState("desc");
 
   const filtered = useMemo(() => {
     let items = [...risks];
@@ -35,19 +37,31 @@ export default function TrackedObjectsTable({ risks = [], onSelectObject, select
     }
     if (altFilter !== "all") {
       items = items.filter(r => {
-        const a = r.position?.geodetic?.altitude ?? r.altitude ?? 0;
-        if (altFilter === "leo") return a < 2000;
-        if (altFilter === "meo") return a >= 2000 && a < 35000;
-        if (altFilter === "geo") return a >= 35000;
+        const a = r.perigee ?? r.position?.geodetic?.altitude ?? 0;
+        const apogee = r.apogee ?? a;
+        const eccentricity = apogee > 0 ? (apogee - a) / (apogee + a + 12742) : 0;
+        if (altFilter === "leo") return a >= 160 && a < 2000;
+        if (altFilter === "meo") return a >= 2000 && a < 35586;
+        if (altFilter === "geo") return a >= 35586 && a <= 35986;
+        if (altFilter === "heo") return eccentricity > 0.25;
         return true;
       });
     }
     if (catFilter !== "all") {
       items = items.filter(r => (r.catalog || "").toLowerCase().includes(catFilter));
     }
+    items = [...items].sort((a, b) => {
+      if (sortCol === "noradId" || sortCol === "name") {
+        const as = String(a[sortCol] ?? "");
+        const bs = String(b[sortCol] ?? "");
+        return sortDir === "asc" ? as.localeCompare(bs) : bs.localeCompare(as);
+      }
+      const av = Number(a[sortCol]) || 0;
+      const bv = Number(b[sortCol]) || 0;
+      return sortDir === "asc" ? av - bv : bv - av;
+    });
     return items;
-  }, [risks, search, riskFilter, altFilter, catFilter]);
-
+  }, [risks, search, riskFilter, altFilter, catFilter, sortCol, sortDir]);
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const clampedPage = Math.min(page, totalPages - 1);
   const pageItems = filtered.slice(clampedPage * PAGE_SIZE, (clampedPage + 1) * PAGE_SIZE);
@@ -77,9 +91,10 @@ export default function TrackedObjectsTable({ risks = [], onSelectObject, select
           </select>
           <select className="input tracked-table__select" value={altFilter} onChange={e => { setAltFilter(e.target.value); setPage(0); }}>
             <option value="all">Altitudes</option>
-            <option value="leo">LEO (&lt;2000km)</option>
-            <option value="meo">MEO</option>
-            <option value="geo">GEO</option>
+            <option value="leo">LEO (160–2,000 km)</option>
+            <option value="meo">MEO (2,000–35,786 km)</option>
+            <option value="geo">GEO (35,786 km ± 200 km)</option>
+            <option value="heo">HEO (Eccentricity &gt; 0.25)</option>
           </select>
           <select className="input tracked-table__select" value={catFilter} onChange={e => { setCatFilter(e.target.value); setPage(0); }}>
             <option value="all">Category</option>
@@ -92,11 +107,28 @@ export default function TrackedObjectsTable({ risks = [], onSelectObject, select
         <table className="tracked-table__table">
           <thead>
             <tr>
-              <th>ID</th>
-              <th>Name</th>
-              <th>Risk Score</th>
-              <th>Approach</th>
-              <th>Alt (km)</th>
+              {[
+                { key: "noradId", label: "NORAD ID" },
+                { key: "name", label: "Source" },
+                { key: "riskScore", label: "Risk Score" },
+                { key: "closestApproach", label: "Approach" },
+                { key: "perigee", label: "Alt (km)" },
+              ].map(col => (
+                <th
+                  key={col.key}
+                  onClick={() => {
+                    if (sortCol === col.key) {
+                      setSortDir(d => d === "asc" ? "desc" : "asc");
+                    } else {
+                      setSortCol(col.key);
+                      setSortDir("desc");
+                    }
+                  }}
+                  style={{ cursor: "pointer", userSelect: "none" }}
+                >
+                  {col.label} {sortCol === col.key ? (sortDir === "asc" ? "↑" : "↓") : "↕"}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
@@ -115,7 +147,7 @@ export default function TrackedObjectsTable({ risks = [], onSelectObject, select
                     <span className={`pill ${rl.cls}`}>{(r.riskScore ?? 0).toFixed(3)}</span>
                   </td>
                   <td className="mono">{r.closestApproach != null ? Number(r.closestApproach).toFixed(2) : 'N/A'} km</td>
-                  <td className="mono">{(r.position?.geodetic?.altitude ?? r.altitude ?? 0).toFixed(0)}</td>
+                  <td className="mono">{r.perigee != null ? r.perigee.toFixed(0) : (r.position?.geodetic?.altitude ?? 0).toFixed(0)}</td>
                 </tr>
               );
             })}

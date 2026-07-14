@@ -38,14 +38,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 
-# ── FastAI ─────────────────────────────────────────────────────────────────────
-
-from fastai.data.core import DataLoaders
-from fastai.learner import Learner
-from fastai.callback.core import Callback
-from fastai.callback.schedule import fit_one_cycle  # patches Learner
-from fastai.metrics import mae as fastai_mae
-
 # ── scikit-learn ───────────────────────────────────────────────────────────────
 
 from sklearn.ensemble import RandomForestClassifier
@@ -187,7 +179,10 @@ def split_by_object(df, train_ratio=TRAIN_RATIO, val_ratio=VAL_RATIO,
     """
     rng = np.random.default_rng(seed)
 
-    unique_ids = df["NORAD_CAT_ID"].unique().copy()
+    unique_ids = df["NORAD_CAT_ID"].unique()
+    if hasattr(unique_ids, 'to_numpy'):
+        unique_ids = unique_ids.to_numpy()
+    unique_ids = unique_ids.copy()
     n_total = len(unique_ids)
     rng.shuffle(unique_ids)
 
@@ -248,8 +243,6 @@ def prepare_dataset(parquet_path=None, seed=RANDOM_SEED):
     save_splits(train_df, val_df, test_df)
 
     return train_df, val_df, test_df
-
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # GRU Architecture  (PyTorch GRU + Linear layer)
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -292,38 +285,6 @@ class _SequenceDataset(Dataset):
     def __getitem__(self, idx):
         return self.X[idx], self.y[idx]
 
-
-class _EpochTracker(Callback):
-    """Record per-epoch train / val / test MSE for diagnostics curves."""
-    order = 65
-
-    def __init__(self, test_dl=None):
-        super().__init__()
-        self._test_dl = test_dl
-
-    def before_fit(self):
-        self.train_curve, self.val_curve, self.test_curve = [], [], []
-        self._batch_losses = []
-
-    def after_batch(self):
-        if self.training:
-            self._batch_losses.append(float(self.loss))
-
-    def after_epoch(self):
-        # Average training MSE this epoch
-        if self._batch_losses:
-            self.train_curve.append(
-                sum(self._batch_losses) / len(self._batch_losses)
-            )
-            self._batch_losses = []
-        # Validation MSE (first value in recorder.values row)
-        if self.recorder.values:
-            self.val_curve.append(float(self.recorder.values[-1][0]))
-        # Test MSE (diagnostic only — not used for training decisions)
-        if self._test_dl is not None:
-            self.test_curve.append(_eval_mse(self.model, self._test_dl))
-
-
 def _eval_mse(model, dl):
     """Forward-pass MSE over an entire DataLoader."""
     dev = next(model.parameters()).device
@@ -358,67 +319,88 @@ def _normalize_datasets(train_ds, *other):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def train_gru(train_df, val_df, test_df):
-    """Train GRU, evaluate on test set, return results dict."""
+    """Train GRU with pure PyTorch (no fastai dependency)."""
     logger.info("Building GRU sequence datasets...")
     train_ds = _SequenceDataset(train_df)
     val_ds = _SequenceDataset(val_df)
     test_ds = _SequenceDataset(test_df)
-
     logger.info("Normalising features (Z-score from train)...")
     _normalize_datasets(train_ds, val_ds, test_ds)
-
     train_dl = DataLoader(train_ds, batch_size=GRU_BS, shuffle=True)
     val_dl = DataLoader(val_ds, batch_size=GRU_BS * 2, shuffle=False)
     test_dl = DataLoader(test_ds, batch_size=GRU_BS * 2, shuffle=False)
-
     model = DebrisRiskGRU().to(DEVICE)
-    dls = DataLoaders(train_dl, val_dl, device=DEVICE)
-
-    tracker = _EpochTracker(test_dl=test_dl)
-    learn = Learner(
-        dls, model,
-        loss_func=nn.MSELoss(),
-        metrics=[fastai_mae],
-        cbs=[tracker],
+    optimizer = torch.optim.Adam(model.parameters(), lr=GRU_LR)
+    scheduler = torch.optim.lr_scheduler.OneCycleLR(
+        optimizer, max_lr=GRU_LR,
+        steps_per_epoch=len(train_dl),
+        epochs=GRU_EPOCHS,
     )
-
-    logger.info("Training GRU — %d epochs, lr=%.4f, bs=%d",
-                GRU_EPOCHS, GRU_LR, GRU_BS)
+    loss_fn = nn.MSELoss()
+    train_curve, val_curve, test_curve = [], [], []
+    logger.info("Training GRU — %d epochs, lr=%.4f, bs=%d", GRU_EPOCHS, GRU_LR, GRU_BS)
     t0 = _time.perf_counter()
-    learn.fit_one_cycle(GRU_EPOCHS, lr_max=GRU_LR)
+    header = f"{'epoch':<8} {'train_loss':<12} {'valid_loss':<12} {'mae':<10} {'time'}"
+    print(header)
+    for epoch in range(GRU_EPOCHS):
+        t_epoch = _time.perf_counter()
+        # Training
+        model.train()
+        batch_losses = []
+        for xb, yb in train_dl:
+            xb, yb = xb.to(DEVICE), yb.to(DEVICE)
+            optimizer.zero_grad()
+            pred = model(xb)
+            loss = loss_fn(pred, yb)
+            loss.backward()
+            optimizer.step()
+            scheduler.step()
+            batch_losses.append(loss.item())
+        train_mse = sum(batch_losses) / len(batch_losses)
+        train_curve.append(round(train_mse, 6))
+        # Validation
+        val_mse = _eval_mse(model, val_dl)
+        val_curve.append(round(val_mse, 6))
+        # Validation MAE
+        model.eval()
+        all_p, all_t = [], []
+        with torch.no_grad():
+            for xb, yb in val_dl:
+                xb, yb = xb.to(DEVICE), yb.to(DEVICE)
+                all_p.append(model(xb))
+                all_t.append(yb)
+        val_mae = F.l1_loss(torch.cat(all_p), torch.cat(all_t)).item()
+        # Test MSE
+        test_mse_epoch = _eval_mse(model, test_dl)
+        test_curve.append(round(test_mse_epoch, 6))
+        elapsed_epoch = _time.perf_counter() - t_epoch
+        print(f"{epoch:<8} {train_mse:<12.6f} {val_mse:<12.6f} {val_mae:<10.6f} {elapsed_epoch:.0f}s")
     elapsed = _time.perf_counter() - t0
     logger.info("GRU training completed in %.1fs", elapsed)
-
-    # ── Final test evaluation ──────────────────────────────────────────────────
-    # FastAI may silently move model to MPS on Apple Silicon — bring it back
-    model = model.cpu()
+    # Final test evaluation
     model.eval()
     all_p, all_t = [], []
     with torch.no_grad():
         for xb, yb in test_dl:
+            xb, yb = xb.to(DEVICE), yb.to(DEVICE)
             all_p.append(model(xb))
             all_t.append(yb)
     preds = torch.cat(all_p)
     targs = torch.cat(all_t)
     test_mse = F.mse_loss(preds, targs).item()
     test_mae = F.l1_loss(preds, targs).item()
-
     mse_passed = test_mse <= GRU_MSE_THR
     mae_passed = test_mae <= GRU_MAE_THR
     passed = mse_passed or mae_passed
-
     logger.info(
         "GRU test  MSE=%.6f (%s ≤ %.2f)  MAE=%.6f (%s ≤ %.2f)  → %s",
         test_mse, "PASS" if mse_passed else "FAIL", GRU_MSE_THR,
         test_mae, "PASS" if mae_passed else "FAIL", GRU_MAE_THR,
         "COMPLIANCE PASSED" if passed else "COMPLIANCE FAILED",
     )
-
-    # Save weights
     MODEL_DIR.mkdir(parents=True, exist_ok=True)
     torch.save(model.state_dict(), MODEL_DIR / "best_model.pth")
     logger.info("Saved GRU weights → %s", MODEL_DIR / "best_model.pth")
-
     return {
         "model": model,
         "mse": test_mse,
@@ -426,9 +408,9 @@ def train_gru(train_df, val_df, test_df):
         "mse_passed": mse_passed,
         "mae_passed": mae_passed,
         "passed": passed,
-        "train_curve": tracker.train_curve,
-        "val_curve": tracker.val_curve,
-        "test_curve": tracker.test_curve,
+        "train_curve": train_curve,
+        "val_curve": val_curve,
+        "test_curve": test_curve,
     }
 
 
@@ -729,6 +711,25 @@ def run_training_pipeline(parquet_path=None, seed=RANDOM_SEED):
         if gru["mae_passed"]:
             reasons.append(f"GRU MAE {gru['mae']:.6f} <= {GRU_MAE_THR}")
         acceptance_reason = "; ".join(reasons)
+        # Run GRU inference on all objects and save risk scores
+        logger.info("Running GRU inference on full dataset...")
+        full_df = pd.concat([train_df, val_df, test_df])
+        model = gru["model"]
+        model.eval()
+        all_scores = {}
+        with torch.no_grad():
+            for nid, obj in full_df.groupby("NORAD_CAT_ID"):
+                obj_sorted = obj.sort_values("step")
+                feats = np.nan_to_num(obj_sorted[GRU_FEATURES].values, nan=0.0).astype(np.float32)
+                x = torch.from_numpy(feats).unsqueeze(0)
+                pred = model(x).squeeze(0).numpy()
+                all_scores[str(nid)] = float(np.clip(np.mean(pred), 0.0, 1.0))
+
+        # Save scores to parquet
+        score_df = pd.DataFrame(list(all_scores.items()), columns=["NORAD_CAT_ID", "gru_risk_score"])
+        score_path = CACHE_DIR / "gru_risk_scores.parquet"
+        score_df.to_parquet(score_path, index=False)
+        logger.info("Saved GRU risk scores for %d objects → %s", len(all_scores), score_path)
         logger.info("GRU PASSED compliance — skipping Steps 2-3.")
     else:
         logger.info("GRU FAILED compliance — proceeding to Steps 2-3.")
@@ -781,7 +782,12 @@ def run_training_pipeline(parquet_path=None, seed=RANDOM_SEED):
                            gru, rf, split_info)
     return diag
 
-
+def _eci_to_geodetic(x, y, z):
+    r = math.sqrt(x**2 + y**2 + z**2)
+    lat = math.degrees(math.asin(z / r)) if r > 0 else 0
+    lon = math.degrees(math.atan2(y, x))
+    alt = r - 6371.0
+    return lat, lon, alt
 # ═══════════════════════════════════════════════════════════════════════════════
 # STEP 5 — FastAPI  GET /model-diagnostics
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -820,24 +826,35 @@ def create_app():
     @app.get("/api/health")
     async def health():
         df = pd.read_parquet(PARQUET_INPUT)
+        df["NORAD_CAT_ID"] = df["NORAD_CAT_ID"].astype(str)
         return {"status": "ok", "objects": len(df.drop_duplicates(subset="NORAD_CAT_ID"))}
 
     @app.get("/api/risks")
     async def risks(limit: int = 1000, minRisk: float = 0.0):
         df = pd.read_parquet(PARQUET_INPUT)
+        df["NORAD_CAT_ID"] = df["NORAD_CAT_ID"].astype(str)
         obj = df.drop_duplicates(subset="NORAD_CAT_ID").copy()
+        # Load GRU risk scores
+        score_path = CACHE_DIR / "gru_risk_scores.parquet"
+        if score_path.exists():
+            scores_df = pd.read_parquet(score_path)
+            scores_df["NORAD_CAT_ID"] = scores_df["NORAD_CAT_ID"].astype(str)
+            obj = obj.merge(scores_df, on="NORAD_CAT_ID", how="left")
+            obj["gru_risk_score"] = obj["gru_risk_score"].fillna(0.0)
+        else:
+            obj["gru_risk_score"] = 0.0
         obj = obj.dropna(subset=["min_altitude", "nearest_approach"])
         name_map = _load_name_map()
         scored = []
         for _, row in obj.iterrows():
             norad = int(row["NORAD_CAT_ID"])
             name = name_map.get(norad, "UNKNOWN")
-            risk = round(float(row["decay_rate"]) * 100, 4) if not pd.isna(row["decay_rate"]) else 0.0
+            risk = round(float(row["gru_risk_score"]), 4)
             if risk < minRisk:
                 continue
-            if row["min_altitude"] < 400:
+            if risk >= 0.70:
                 label = "Critical"
-            elif row["min_altitude"] < 650:
+            elif risk >= 0.45:
                 label = "Watch"
             else:
                 label = "Safe"
@@ -847,12 +864,20 @@ def create_app():
                 "riskScore": risk,
                 "riskLabel": label,
                 "perigee": round(float(row["min_altitude"]), 1) if not pd.isna(row["min_altitude"]) else 0.0,
-"apogee": round(float(row["min_altitude"]), 1) if not pd.isna(row["min_altitude"]) else 0.0,
-"inclination": 0.0,
-"shellDensity": int(row["shell_density"]) if not pd.isna(row["shell_density"]) else 0,
-"closestApproach": round(float(row["nearest_approach"]), 2) if not pd.isna(row["nearest_approach"]) else 0.0,
+                "apogee": round(float(row["min_altitude"]), 1) if not pd.isna(row["min_altitude"]) else 0.0,
+                "inclination": 0.0,
+                "shellDensity": int(row["shell_density"]) if not pd.isna(row["shell_density"]) else 0,
+                "closestApproach": round(float(row["nearest_approach"]), 2) if not pd.isna(row["nearest_approach"]) else 0.0,
                 "objectType": "Debris",
                 "source": name,
+                "catalog": name if name != "UNKNOWN" else "Unknown",
+                "position": {
+                    "geodetic": {
+                        "latitude": round(_eci_to_geodetic(float(row["X"]), float(row["Y"]), float(row["Z"]))[0], 4) if not pd.isna(row["X"]) else 0.0,
+                        "longitude": round(_eci_to_geodetic(float(row["X"]), float(row["Y"]), float(row["Z"]))[1], 4) if not pd.isna(row["X"]) else 0.0,
+                        "altitude": round(_eci_to_geodetic(float(row["X"]), float(row["Y"]), float(row["Z"]))[2], 2) if not pd.isna(row["X"]) else 0.0,
+                    }
+                },
             })
         scored.sort(key=lambda x: x["riskScore"], reverse=True)
         cosmos_count = len([s for s in scored if "COSMOS" in s["name"]])
@@ -870,11 +895,11 @@ def create_app():
     @app.get("/api/debris")
     async def debris():
         df = pd.read_parquet(PARQUET_INPUT)
+        df["NORAD_CAT_ID"] = df["NORAD_CAT_ID"].astype(str)
         obj = df.drop_duplicates(subset="NORAD_CAT_ID").copy()
-        obj = obj.dropna(subset=["min_altitude", "nearest_approach"])
         name_map = _load_name_map()
-        cosmos_ids = [k for k, v in name_map.items() if "COSMOS" in v]
-        iridium_ids = [k for k, v in name_map.items() if "IRIDIUM" in v]
+        cosmos_ids = [str(k) for k, v in name_map.items() if "COSMOS" in v]
+        iridium_ids = [str(k) for k, v in name_map.items() if "IRIDIUM" in v]
         cosmos = obj[obj["NORAD_CAT_ID"].isin(cosmos_ids)]
         iridium = obj[obj["NORAD_CAT_ID"].isin(iridium_ids)]
         return {
@@ -884,6 +909,38 @@ def create_app():
                 "total":      {"label": "Total Objects",       "count": len(obj)},
             },
             "total": len(obj)
+        }
+    @app.get("/api/propagate/{norad_id}")
+    async def propagate(norad_id: int, duration: int = 2880, interval: int = 5):
+        df = pd.read_parquet(PARQUET_INPUT)
+        df["NORAD_CAT_ID"] = df["NORAD_CAT_ID"].astype(str)
+        obj = df[df["NORAD_CAT_ID"] == str(norad_id)].sort_values("step")
+        if len(obj) == 0:
+            return {"error": f"NORAD {norad_id} not found", "trajectoryPoints": []}
+        points = []
+        for _, row in obj.iterrows():
+            if pd.isna(row["altitude"]):
+                continue
+            lat, lon, alt = _eci_to_geodetic(float(row["X"]), float(row["Y"]), float(row["Z"]))
+            points.append({
+                "time": str(row["timestamp"]),
+                "x": round(float(row["X"]), 4),
+                "y": round(float(row["Y"]), 4),
+                "z": round(float(row["Z"]), 4),
+                "vx": round(float(row["VX"]), 4),
+                "vy": round(float(row["VY"]), 4),
+                "vz": round(float(row["VZ"]), 4),
+                "altitude": round(float(row["altitude"]), 2),
+                "geodetic": {
+                    "latitude": round(lat, 4),
+                    "longitude": round(lon, 4),
+                    "altitude": round(alt, 2),
+                }
+            })
+        return {
+            "noradId": norad_id,
+            "totalPoints": len(points),
+            "trajectoryPoints": points,
         }
 
     return app

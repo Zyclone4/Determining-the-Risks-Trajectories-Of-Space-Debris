@@ -8,6 +8,58 @@ function formatCountdown(seconds) {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
+function DismissDropdown({ onDismissOne, onDismissAll }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    function handleClick(e) {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  return (
+    <div style={{ position: "relative" }} ref={ref}>
+      <button className="btn btn-ghost" onClick={() => setOpen(o => !o)}>
+        Dismiss
+      </button>
+      {open && (
+        <div style={{
+          position: "absolute",
+          top: "calc(100% + 6px)",
+          left: 0,
+          background: "#161b22",
+          border: "1px solid #30363d",
+          borderRadius: 6,
+          overflow: "hidden",
+          zIndex: 1000,
+          minWidth: 160,
+          boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
+        }}>
+          <button
+            style={{ display: "block", width: "100%", padding: "8px 14px", background: "none", border: "none", color: "#c9d1d9", fontSize: 12, textAlign: "left", cursor: "pointer" }}
+            onMouseEnter={e => e.target.style.background = "#21262d"}
+            onMouseLeave={e => e.target.style.background = "none"}
+            onClick={() => { setOpen(false); onDismissOne(); }}
+          >
+            Dismiss this object
+          </button>
+          <button
+            style={{ display: "block", width: "100%", padding: "8px 14px", background: "none", border: "none", color: "#f85149", fontSize: 12, textAlign: "left", cursor: "pointer" }}
+            onMouseEnter={e => e.target.style.background = "#21262d"}
+            onMouseLeave={e => e.target.style.background = "none"}
+            onClick={() => { setOpen(false); onDismissAll(); }}
+          >
+            Dismiss all alerts
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function CriticalWarningBanner({
   noradId,
   name,
@@ -27,7 +79,12 @@ export default function CriticalWarningBanner({
   nearestActive,
   shellDensity,
   riskBasis,
+  currentIndex = 0,
+  totalCount = 1,
+  onPrev,
+  onNext,
   onDismiss,
+  onDismissOne,
 }) {
   const [showDetail, setShowDetail] = useState(false);
   const [countdown, setCountdown] = useState(countdownSeconds);
@@ -43,7 +100,6 @@ export default function CriticalWarningBanner({
   const riskPct = Math.min(riskScore * 100, 100);
 
   if (!showDetail) {
-    // ── Banner State ──
     return (
       <div className="crit-banner slide-down">
         <div className="crit-banner__body">
@@ -65,19 +121,24 @@ export default function CriticalWarningBanner({
               {inclination != null && <span><em>Inclination</em> {inclination}°</span>}
             </div>
             <div className="crit-banner__actions">
-              <button className="btn btn-danger" onClick={() => setShowDetail(true)}>
-                View Detail ↗
-              </button>
-              <button className="btn btn-ghost" onClick={onDismiss}>Dismiss</button>
+              <div className="crit-banner__actions-left">
+                <button className="btn btn-danger" onClick={() => setShowDetail(true)}>View Detail ↗</button>
+                <DismissDropdown onDismissOne={onDismissOne} onDismissAll={onDismiss} />
+              </div>
+              {totalCount > 1 && (
+                <div className="crit-banner__nav">
+                  <button className="btn btn-ghost" onClick={onPrev} disabled={currentIndex === 0}>←</button>
+                  <span className="mono crit-banner__nav-count">{currentIndex + 1} / {totalCount}</span>
+                  <button className="btn btn-ghost" onClick={onNext} disabled={currentIndex === totalCount - 1}>→</button>
+                </div>
+              )}
             </div>
           </div>
-          <button className="crit-banner__close" onClick={onDismiss} aria-label="Dismiss">✕</button>
         </div>
       </div>
     );
   }
 
-  // ── Expanded Detail State ──
   return (
     <div className="crit-detail slide-down">
       <div className="crit-detail__header">
@@ -93,9 +154,7 @@ export default function CriticalWarningBanner({
           {lastPropagated && <span> · Last propagated: {lastPropagated}</span>}
         </div>
       </div>
-
       <div className="crit-detail__grid">
-        {/* Left Column */}
         <div className="crit-detail__col">
           <div className="crit-detail__field">
             <span className="crit-detail__label">Risk Score</span>
@@ -112,8 +171,6 @@ export default function CriticalWarningBanner({
           {approachAlt != null && <DetailField label="Approach Altitude" value={`${approachAlt} km`} />}
           {inclination != null && <DetailField label="Inclination" value={`${inclination}°`} />}
         </div>
-
-        {/* Right Column */}
         <div className="crit-detail__col">
           {perigee != null && <DetailField label="Perigee" value={`${perigee} km`} />}
           {apogee != null && <DetailField label="Apogee" value={`${apogee} km`} />}
@@ -126,13 +183,28 @@ export default function CriticalWarningBanner({
           <DetailField label="Shell Density" value={shellDensity ?? "—"} />
         </div>
       </div>
-
-      <div className="crit-detail__footer">
+     <div className="crit-detail__footer">
+      <div style={{ paddingBottom: 16 }}>
         <span className="crit-detail__basis">
           <em>Risk basis:</em> {riskBasis || "Keplerian fallback nearest-active approach + altitude envelope"}
         </span>
-        <button className="btn btn-ghost" onClick={onDismiss}>Dismiss Alert</button>
       </div>
+      <div style={{ borderTop: "1px solid rgba(248, 81, 73, 0.2)", paddingTop: 14 }}>
+      <div className="crit-banner__actions">
+          <div className="crit-banner__actions-left">
+            <button className="btn btn-ghost" onClick={() => setShowDetail(false)}>Collapse ↑</button>
+            <DismissDropdown onDismissOne={onDismissOne} onDismissAll={onDismiss} />
+          </div>
+          {totalCount > 1 && (
+            <div className="crit-banner__nav">
+              <button className="btn btn-ghost" onClick={onPrev} disabled={currentIndex === 0}>←</button>
+              <span className="mono crit-banner__nav-count">{currentIndex + 1} / {totalCount}</span>
+              <button className="btn btn-ghost" onClick={onNext} disabled={currentIndex === totalCount - 1}>→</button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
     </div>
   );
 }

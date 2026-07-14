@@ -39,16 +39,17 @@ function App() {
   const [riskData, setRiskData] = useState(null);
   const [diagData, setDiagData] = useState(null);
   const [selectedObject, setSelectedObject] = useState(null);
+  const [globeSelectedId, setGlobeSelectedId] = useState(null);
   const [trajectoryPoints, setTrajectoryPoints] = useState([]);
   const [dismissedBanner, setDismissedBanner] = useState(false);
-
+  
   // ── UI state ──
   const [isLoading, setIsLoading] = useState(false);
   const [backendOnline, setBackendOnline] = useState(false);
   const [lastUpdate, setLastUpdate] = useState(null);
   const [error, setError] = useState(null);
   const [toggles, setToggles] = useState(DEFAULT_TOGGLES);
-
+  
   // ── Health check ──
   useEffect(() => {
     checkHealth()
@@ -60,6 +61,11 @@ function App() {
   useEffect(() => {
     fetchModelDiagnostics().then(d => { if (d) setDiagData(d); });
   }, []);
+
+  // ── Auto-load on mount ──
+  useEffect(() => {
+    if (backendOnline) handleAnalyze();
+  }, [backendOnline]);
 
   // ── Analyze handler ──
   const handleAnalyze = useCallback(async () => {
@@ -82,7 +88,20 @@ function App() {
   }, []);
 
   // ── Select object ──
-  const handleSelectObject = useCallback(async (noradId) => {
+  // Globe click — only sets trajectory, no modal
+  const handleGlobeSelect = useCallback(async (noradId) => {
+    setSelectedObject(null);  // close modal
+    setGlobeSelectedId(noradId);  // track for globe
+    try {
+      const traj = await fetchTrajectory(noradId, { duration: 2880, interval: 5 });
+      setTrajectoryPoints(traj.trajectoryPoints || []);
+    } catch {
+      setTrajectoryPoints([]);
+    }
+  }, []);
+
+  // Table click — full modal with all object data
+  const handleTableSelect = useCallback(async (noradId) => {
     const obj = riskData?.risks?.find(r => String(r.noradId) === String(noradId));
     setSelectedObject(obj || { noradId });
     try {
@@ -122,11 +141,15 @@ function App() {
   }, [allRisks, toggles.top50]);
 
   // Critical object for banner
-  const criticalObj = useMemo(() => {
-    if (!allRisks.length) return null;
-    const top = allRisks.reduce((a, b) => ((a.riskScore ?? 0) > (b.riskScore ?? 0) ? a : b), allRisks[0]);
-    return (top.riskScore ?? 0) >= 0.90 ? top : null;
+  const criticalObjects = useMemo(() => {
+    if (!allRisks.length) return [];
+    return allRisks
+      .filter(r => (r.riskScore ?? 0) >= 0.70)
+      .sort((a, b) => (b.riskScore ?? 0) - (a.riskScore ?? 0));
   }, [allRisks]);
+
+  const [criticalIndex, setCriticalIndex] = useState(0);
+  const criticalObj = criticalObjects[criticalIndex] || null;
 
   const totalActive = riskData?.totalSatellitesUsed || 0;
   const totalDebris = riskData?.totalDebrisAnalyzed || 0;
@@ -149,12 +172,11 @@ function App() {
       />
 
       {/* ── Critical Warning Banner ── */}
-      {criticalObj && !dismissedBanner && (
+      {criticalObjects.length > 0 && !dismissedBanner && (
         <CriticalWarningBanner
           noradId={criticalObj.noradId}
           name={criticalObj.name}
           riskScore={criticalObj.riskScore ?? 0}
-          countdownSeconds={1080}
           approachAlt={criticalObj.position?.geodetic?.altitude?.toFixed?.(0)}
           missDistance={criticalObj.closestApproach?.toFixed?.(1)}
           relVelocity={criticalObj.relVelocity?.toFixed?.(2)}
@@ -164,6 +186,17 @@ function App() {
           apogee={criticalObj.apogee?.toFixed?.(0)}
           shellDensity={criticalObj.shellDensity}
           riskBasis={criticalObj.riskBasis}
+          currentIndex={criticalIndex}
+          totalCount={criticalObjects.length}
+          onPrev={() => setCriticalIndex(i => Math.max(0, i - 1))}
+          onNext={() => setCriticalIndex(i => Math.min(criticalObjects.length - 1, i + 1))}
+          onDismissOne={() => {
+            if (criticalIndex < criticalObjects.length - 1) {
+              setCriticalIndex(i => i + 1);
+            } else {
+              setDismissedBanner(true);
+            }
+          }}
           onDismiss={() => setDismissedBanner(true)}
         />
       )}
@@ -175,13 +208,17 @@ function App() {
       <div className="dashboard">
         {/* Globe */}
         <div className="dashboard__globe">
+          <div style={{ fontSize: "0.95rem", fontWeight: 700, color: "var(--color-text-primary)", marginBottom: "8px", letterSpacing: "0.04em" }}>
+            3D Orbital Debris Visualizer
+          </div>
           <div style={{ position: "relative" }}>
             <Globe
               objects={globeObjects}
               trajectoryPoints={trajectoryPoints}
-              selectedObjectId={selectedObject?.noradId}
-              selectedObjectName={selectedObject?.name}
-              onSelectObject={handleSelectObject}
+              selectedObjectId={globeSelectedId}
+              selectedObjectName={riskData?.risks?.find(r => String(r.noradId) === String(globeSelectedId))?.name}
+              selectedObjectRisk={riskData?.risks?.find(r => String(r.noradId) === String(globeSelectedId))?.riskLabel}
+              onSelectObject={handleGlobeSelect}
               showGrid={toggles.grid}
             />
 
@@ -249,7 +286,7 @@ function App() {
           <TrackedObjectsTable
             risks={allRisks}
             selectedId={selectedObject?.noradId}
-            onSelectObject={handleSelectObject}
+            onSelectObject={handleTableSelect}
           />
         </div>
       </div>

@@ -4,14 +4,12 @@ function formatUTC(d) {
   return d.toISOString().replace("T", " ").slice(0, 19) + " UTC";
 }
 
-function toLocalInput(d) {
-  const off = d.getTimezoneOffset();
-  const local = new Date(d.getTime() - off * 60000);
-  return local.toISOString().slice(0, 16);
+function toUTCInput(d) {
+  return d.toISOString().slice(0, 16);
 }
 
 export default function Header({ backendOnline, lastUpdate, onAnalyze, isLoading }) {
-  const [startTime, setStartTime] = useState(toLocalInput(new Date()));
+  const [startTime, setStartTime] = useState(toUTCInput(new Date()));
 
   return (
     <header className="header">
