@@ -3,7 +3,7 @@
  */
 import { useRef, useMemo, useState, useEffect } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { OrbitControls, Sphere, Stars, Html } from "@react-three/drei";
+import { OrbitControls, Sphere, Stars, Html, Line } from "@react-three/drei";
 import * as THREE from "three";
 import { createPortal } from "react-dom";
 
@@ -126,21 +126,68 @@ function DebrisPoints({ objects, onSelect, selectedId, trajectoryPoints, playbac
     </group>
   );
 }
+// 1. Add 'Line' to your import from @react-three/drei at the top of Globe.jsx if it isn't there:
+// import { OrbitControls, Sphere, Stars, Html, Line } from "@react-three/drei";
+
 function TrajectoryLine({ points, color = "#06b6d4" }) {
-  const lineGeometry = useMemo(() => {
-    if (!points?.length) return null;
-    // One orbit ≈ 100 min at 700-800km, 5-min intervals = ~20 steps
-    const oneOrbit = points.filter(p => p.geodetic).slice(0, 20);
-    const vertices = oneOrbit.map(p => {
-      const pos = geoToCartesian(p.geodetic.latitude, p.geodetic.longitude, p.geodetic.altitude);
-      return new THREE.Vector3(...pos);
+  const linePoints = useMemo(() => {
+    if (!Array.isArray(points) || points.length < 2) return [];
+
+    const vectors = [];
+
+    // 1. Extract valid vectors
+    points.forEach((p) => {
+      const geo = p?.geodetic || p;
+      if (!geo) return;
+
+      const lat = Number(geo.latitude ?? geo.lat);
+      const lon = Number(geo.longitude ?? geo.lon ?? geo.lng);
+      const alt = Number(geo.altitude ?? geo.alt ?? 500);
+
+      if (isNaN(lat) || isNaN(lon)) return;
+
+      const pos = geoToCartesian(lat, lon, isNaN(alt) ? 500 : alt);
+      if (pos && !pos.some(isNaN)) {
+        const vec = new THREE.Vector3(...pos);
+        
+        // Filter out near-identical adjacent points that thicken the line
+        if (vectors.length === 0 || vec.distanceToSquared(vectors[vectors.length - 1]) > 0.0001) {
+          vectors.push(vec);
+        }
+      }
     });
-    if (vertices.length < 2) return null;
-    const curve = new THREE.CatmullRomCurve3(vertices, false);
-    return new THREE.TubeGeometry(curve, 200, 0.003, 6, false);
+
+    if (vectors.length < 2) return [];
+
+    // 2. Slice to EXACTLY 1 orbit (~21 points) to prevent the tail from wrapping into revolution 2
+    const ONE_ORBIT_COUNT = Math.min(21, vectors.length);
+    const orbitSlice = vectors.slice(0, ONE_ORBIT_COUNT);
+
+    if (orbitSlice.length < 3) return orbitSlice;
+
+    // 3. Resample into a smooth, non-overlapping spline curve
+    try {
+      const curve = new THREE.CatmullRomCurve3(orbitSlice, false, "centripetal");
+      return curve.getPoints(70);
+    } catch (e) {
+      return orbitSlice;
+    }
   }, [points]);
-  if (!lineGeometry) return null;
-  return <mesh geometry={lineGeometry}><meshBasicMaterial color={color} depthWrite={false} /></mesh>;
+
+  if (!linePoints || linePoints.length < 2) return null;
+
+  return (
+    <Line
+      points={linePoints}
+      color={color}
+      lineWidth={1.2}
+      worldUnits={false}
+      depthTest={true}
+      depthWrite={false}
+      transparent
+      opacity={0.85}
+    />
+  );
 }
 
 function PlaybackMarker({ points, stepIndex }) {
@@ -201,9 +248,10 @@ export default function Globe({
           <DebrisPoints 
             objects={objects} 
             selectedId={selectedObjectId} 
-            onSelect={(id, e) => { 
+            onSelect={(id) => { 
               onSelectObject(id); 
-              if (e) setSelectedPos({ x: e.clientX + 12, y: e.clientY - 20 }); 
+              // Lock selectedPos to the current hover position so there is 0 shift
+              setSelectedPos(tooltipPos); 
             }}
             trajectoryPoints={trajectoryPoints} 
             playbackStep={step}
@@ -212,7 +260,12 @@ export default function Globe({
               if (hoverTimeout.current) clearTimeout(hoverTimeout.current);
               setHoveredId(id);
               setHoveredObj(obj);
-              if (e) setTooltipPos({ x: e.clientX + 12, y: e.clientY - 20 });
+              if (e) {
+                // Use clientX / clientY directly from the event
+                const x = e.clientX ?? e.nativeEvent?.clientX ?? 0;
+                const y = e.clientY ?? e.nativeEvent?.clientY ?? 0;
+                setTooltipPos({ x: x + 12, y: y - 20 });
+              }
             }}
             onHoverEnd={() => {
               hoverTimeout.current = setTimeout(() => setHoveredId(null), 300);
@@ -225,12 +278,18 @@ export default function Globe({
             const pos = geoToCartesian(latitude, longitude, altitude);
             return <ScreenPosition position={pos} onPosition={setLabelScreenPos} />;
           })()}
-          <TrajectoryLine points={trajectoryPoints} color={RISK_LINE_COLORS[selectedObjectRisk] || "#06b6d4"} />
+          {selectedObjectId && trajectoryPoints.length > 0 && (
+            <TrajectoryLine
+              points={trajectoryPoints}
+              currentStep={step}
+              color={RISK_LINE_COLORS[selectedObjectRisk] || "#06b6d4"}
+            />
+          )}
           <OrbitControls enablePan={false} minDistance={1.5} maxDistance={8} enableDamping dampingFactor={0.05} rotateSpeed={0.5} makeDefault onClick={e => e.stopPropagation()} />
         </Canvas>
       </div>
       {/* HTML tooltip overlay */}
-      {hoveredId && hoveredId !== String(selectedObjectId) && (
+      {hoveredId && String(hoveredId) !== String(selectedObjectId) && (
         <div style={{
           position: "fixed",
           left: tooltipPos.x,
@@ -244,19 +303,20 @@ export default function Globe({
           fontFamily: "Inter, sans-serif",
           whiteSpace: "nowrap",
           pointerEvents: "none",
-          zIndex: 1000,
+          zIndex: 99999, // 👈 Change from 1000 to 99999 (highest priority)
           lineHeight: 1.6,
         }}>
           <div style={{ fontWeight: 600 }}>{hoveredObj?.name || "UNKNOWN"}</div>
           <div style={{ color: "#8b949e" }}>NORAD {hoveredId} (Risk: {(hoveredObj?.riskScore ?? 0).toFixed(3)})</div>
         </div>
       )}
+
       {/* Selected object persistent label */}
-      {selectedObjectId && labelScreenPos && (
+      {selectedObjectId && (
         <div style={{
-          position: "absolute",
-          left: labelScreenPos.x + 8,
-          top: labelScreenPos.y - 20,
+          position: "fixed",
+          left: selectedPos.x,
+          top: selectedPos.y,
           background: "rgba(13,17,23,0.92)",
           border: `1px solid ${RISK_LINE_COLORS[selectedObjectRisk] || "#388bfd"}`,
           borderRadius: 4,
@@ -266,7 +326,7 @@ export default function Globe({
           fontFamily: "Inter, sans-serif",
           whiteSpace: "nowrap",
           pointerEvents: "none",
-          zIndex: 99999,
+          zIndex: 1000,
           lineHeight: 1.6,
         }}>
           <div style={{ fontWeight: 600 }}>{objects.find(o => String(o.noradId) === String(selectedObjectId))?.name || "UNKNOWN"}</div>
@@ -287,7 +347,7 @@ export default function Globe({
       {selectedObjectId && trajectoryPoints.length > 1 && (
         <div className="globe-playback">
           <style dangerouslySetInnerHTML={{ __html: `.globe-playback__slider::-webkit-slider-thumb { background: ${thumbColor} !important; }` }} />
-          <div className="globe-playback__info">
+          <div className="globe-playback__info" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <span className="globe-playback__name" style={{ color: RISK_LINE_COLORS[selectedObjectRisk] || "var(--color-text-accent)" }}>
               {selectedObjectName || `Object ${selectedObjectId}`}
               {selectedObjectId && (
@@ -301,7 +361,9 @@ export default function Globe({
             </span>
             <span className="globe-playback__time mono">T+{hoursIn}h / 48h</span>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          
+          {/* Full-width control row */}
+          <div style={{ display: "flex", alignItems: "center", gap: 12, width: "100%" }}>
             <button
               onClick={() => setPlaying(p => !p)}
               style={{
@@ -325,7 +387,7 @@ export default function Globe({
               max={totalSteps - 1}
               value={step}
               onChange={e => { setPlaying(false); setStep(Number(e.target.value)); }}
-              style={{ accentColor: RISK_LINE_COLORS[selectedObjectRisk] || "#388bfd" }}
+              style={{ accentColor: RISK_LINE_COLORS[selectedObjectRisk] || "#388bfd", flex: 1 }}
             />
           </div>
         </div>

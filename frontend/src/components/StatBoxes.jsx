@@ -7,10 +7,10 @@ const BOXES = [
 ];
 
 export default function StatBoxes({ risks = [], totalActive = 0, totalDebris = 0 }) {
-  const total = totalActive + totalDebris;
+  const total = risks.length || (totalActive + totalDebris);
   const leoCount = risks.filter(r => {
-    const alt = r.position?.geodetic?.altitude ?? r.altitude ?? 0;
-    return alt < 2000;
+    const alt = r.perigee ?? r.position?.geodetic?.altitude ?? r.altitude ?? 0;
+    return alt >= 160 && alt < 2000;
   }).length;
   const dangerCount = risks.filter(r => (r.riskScore ?? 0) >= 0.70).length;
   const watchCount = risks.filter(r => { const s = r.riskScore ?? 0; return s >= 0.45 && s < 0.70; }).length;

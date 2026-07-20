@@ -42,6 +42,7 @@ function App() {
   const [globeSelectedId, setGlobeSelectedId] = useState(null);
   const [trajectoryPoints, setTrajectoryPoints] = useState([]);
   const [dismissedBanner, setDismissedBanner] = useState(false);
+  const [dismissedObjects, setDismissedObjects] = useState(new Set());
   
   // ── UI state ──
   const [isLoading, setIsLoading] = useState(false);
@@ -75,7 +76,7 @@ function App() {
     try {
       const [debris, risks] = await Promise.all([
         fetchDebrisData(),
-        fetchRisks({ limit: 1000 }),
+        fetchRisks({ limit: 100000 }),
       ]);
       setDebrisData(debris);
       setRiskData(risks);
@@ -144,9 +145,9 @@ function App() {
   const criticalObjects = useMemo(() => {
     if (!allRisks.length) return [];
     return allRisks
-      .filter(r => (r.riskScore ?? 0) >= 0.70)
+      .filter(r => (r.riskScore ?? 0) >= 0.70 && !dismissedObjects.has(r.noradId))
       .sort((a, b) => (b.riskScore ?? 0) - (a.riskScore ?? 0));
-  }, [allRisks]);
+  }, [allRisks, dismissedObjects]);
 
   const [criticalIndex, setCriticalIndex] = useState(0);
   const criticalObj = criticalObjects[criticalIndex] || null;
@@ -191,11 +192,8 @@ function App() {
           onPrev={() => setCriticalIndex(i => Math.max(0, i - 1))}
           onNext={() => setCriticalIndex(i => Math.min(criticalObjects.length - 1, i + 1))}
           onDismissOne={() => {
-            if (criticalIndex < criticalObjects.length - 1) {
-              setCriticalIndex(i => i + 1);
-            } else {
-              setDismissedBanner(true);
-            }
+              setDismissedObjects(prev => new Set([...prev, criticalObj.noradId]));
+              setCriticalIndex(i => Math.min(i, criticalObjects.length - 2));
           }}
           onDismiss={() => setDismissedBanner(true)}
         />

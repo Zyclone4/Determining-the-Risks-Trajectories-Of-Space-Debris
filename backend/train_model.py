@@ -67,15 +67,14 @@ EARTH_RADIUS_KM = 6371.0
 #   Component 2 (30%): Sigmoid activation — congested shells compound collision odds
 #   Component 3 (20%): Tanh saturation — high BSTAR signals rapid orbital decay
 
-W_APPROACH = 0.50
-W_DENSITY = 0.30
-W_DECAY = 0.20
-
-APPROACH_SCALE = 50.0       # τ₁  km — characteristic danger distance
-DENSITY_MIDPOINT = 100.0    # μ   objects — sigmoid inflection point
-DENSITY_STEEPNESS = 50.0    # s   objects — sigmoid width
-DECAY_SCALE = 0.005         # τ₃  BSTAR units — saturation threshold
-NOISE_STD = 0.02            # ε   std — gaussian perturbation for realism
+W_APPROACH = 0.55
+W_DENSITY = 0.20
+W_DECAY = 0.05
+APPROACH_SCALE = 8.0      # tighter — objects within 8km get high risk
+DENSITY_MIDPOINT = 100.0
+DENSITY_STEEPNESS = 40.0
+DECAY_SCALE = 0.001
+NOISE_STD = 0.01            # ε   std — gaussian perturbation for realism
 
 # ── Split Ratios ───────────────────────────────────────────────────────────────
 
@@ -86,7 +85,9 @@ RANDOM_SEED = 42
 
 # ── GRU Hyper-parameters ──────────────────────────────────────────────────────
 
-GRU_FEATURES = ["X", "Y", "Z", "VX", "VY", "VZ", "altitude"]
+GRU_FEATURES = ["delta_x_tca", "delta_y_tca", "delta_z_tca",
+                 "delta_vx_tca", "delta_vy_tca", "delta_vz_tca",
+                 "nearest_approach", "altitude"]
 GRU_INPUT_SIZE = len(GRU_FEATURES)
 GRU_HIDDEN = 64
 GRU_LAYERS = 2
@@ -138,31 +139,27 @@ def load_dataset(path=None):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def generate_risk_score(df, seed=RANDOM_SEED):
-    """
-    Produce a continuous risk label in [0, 1] using three non-linear
-    components weighted to penalize close approaches, orbital congestion,
-    and atmospheric drag.
-    """
     rng = np.random.default_rng(seed)
-
-    approach = df["nearest_approach"].values.astype(np.float64)
+    
+    # Primary: TCA miss distance (pairwise) — most physically meaningful
+    tca_miss = np.sqrt(
+        df["delta_x_tca"].fillna(1e6).values ** 2 +
+        df["delta_y_tca"].fillna(1e6).values ** 2 +
+        df["delta_z_tca"].fillna(1e6).values ** 2
+    )
+    # Cap at 1000km — beyond that, no conjunction risk
+    tca_miss = np.minimum(tca_miss, 1000.0)
+    
+    # Normalize: 0km = risk 1.0, 1000km = risk 0.0
+    approach_risk = 1.0 - (tca_miss / 1000.0)
+    
+    # Secondary: shell density
     density = df["shell_density"].values.astype(np.float64)
-    decay = df["decay_rate"].values.astype(np.float64)
-
-    approach_risk = np.exp(-approach / APPROACH_SCALE)
-
-    density_risk = 1.0 / (1.0 + np.exp(
-        -(density - DENSITY_MIDPOINT) / DENSITY_STEEPNESS
-    ))
-
-    decay_risk = np.tanh(decay / DECAY_SCALE)
-
-    risk = (W_APPROACH * approach_risk +
-            W_DENSITY * density_risk +
-            W_DECAY * decay_risk)
-
+    density_risk = np.clip(density / 400.0, 0.0, 1.0)
+    
+    # Combine
+    risk = 0.80 * approach_risk + 0.20 * density_risk
     risk += rng.normal(0.0, NOISE_STD, size=len(risk))
-
     return np.clip(risk, 0.0, 1.0)
 
 
@@ -261,8 +258,8 @@ class DebrisRiskGRU(nn.Module):
         self.fc = nn.Linear(hidden_size, 1)
 
     def forward(self, x):
-        out, _ = self.gru(x)          # (B, T, H)
-        return self.fc(out).squeeze(-1)  # (B, T)
+        out, _ = self.gru(x)
+        return self.fc(out).squeeze(-1)
 
 
 class _SequenceDataset(Dataset):
@@ -270,12 +267,15 @@ class _SequenceDataset(Dataset):
 
     def __init__(self, df, feature_cols=None, target_col="risk_score"):
         feature_cols = feature_cols or GRU_FEATURES
-        ids = df["NORAD_CAT_ID"].unique()
+        # Only train on debris objects — active satellites are targets, not predictors
+        debris_df = df[df["debris_status"] == 1] if "debris_status" in df.columns else df
+        ids = debris_df["NORAD_CAT_ID"].unique()
         self.X, self.y = [], []
         for nid in ids:
-            obj = df[df["NORAD_CAT_ID"] == nid].sort_values("step")
+            obj = debris_df[debris_df["NORAD_CAT_ID"] == nid].sort_values("step")
             feats = np.nan_to_num(obj[feature_cols].values, nan=0.0).astype(np.float32)
-            tgt = np.nan_to_num(obj[target_col].values, nan=0.0).astype(np.float32)
+            max_risk = float(obj[target_col].max()) if target_col in obj.columns else 0.0
+            tgt = np.full(len(feats), max_risk, dtype=np.float32)
             self.X.append(torch.from_numpy(feats))
             self.y.append(torch.from_numpy(tgt))
 
@@ -719,11 +719,14 @@ def run_training_pipeline(parquet_path=None, seed=RANDOM_SEED):
         all_scores = {}
         with torch.no_grad():
             for nid, obj in full_df.groupby("NORAD_CAT_ID"):
+                # Only score debris objects — active satellites are targets, not scored
+                if obj["debris_status"].iloc[0] != 1:
+                    continue
                 obj_sorted = obj.sort_values("step")
                 feats = np.nan_to_num(obj_sorted[GRU_FEATURES].values, nan=0.0).astype(np.float32)
                 x = torch.from_numpy(feats).unsqueeze(0)
                 pred = model(x).squeeze(0).numpy()
-                all_scores[str(nid)] = float(np.clip(np.mean(pred), 0.0, 1.0))
+                all_scores[str(nid)] = float(np.clip(np.max(pred), 0.0, 1.0))
 
         # Save scores to parquet
         score_df = pd.DataFrame(list(all_scores.items()), columns=["NORAD_CAT_ID", "gru_risk_score"])
@@ -830,7 +833,7 @@ def create_app():
         return {"status": "ok", "objects": len(df.drop_duplicates(subset="NORAD_CAT_ID"))}
 
     @app.get("/api/risks")
-    async def risks(limit: int = 1000, minRisk: float = 0.0):
+    async def risks(limit: int = 10000, minRisk: float = 0.0):
         df = pd.read_parquet(PARQUET_INPUT)
         df["NORAD_CAT_ID"] = df["NORAD_CAT_ID"].astype(str)
         obj = df.drop_duplicates(subset="NORAD_CAT_ID").copy()
@@ -868,7 +871,7 @@ def create_app():
                 "inclination": 0.0,
                 "shellDensity": int(row["shell_density"]) if not pd.isna(row["shell_density"]) else 0,
                 "closestApproach": round(float(row["nearest_approach"]), 2) if not pd.isna(row["nearest_approach"]) else 0.0,
-                "objectType": "Debris",
+                "objectType": "Debris" if int(row.get("debris_status", 1)) == 1 else "Payload",
                 "source": name,
                 "catalog": name if name != "UNKNOWN" else "Unknown",
                 "position": {
@@ -882,11 +885,13 @@ def create_app():
         scored.sort(key=lambda x: x["riskScore"], reverse=True)
         cosmos_count = len([s for s in scored if "COSMOS" in s["name"]])
         iridium_count = len([s for s in scored if "IRIDIUM" in s["name"]])
+        debris_count = len([s for s in scored if s["objectType"] == "Debris"])
+        active_count = len(scored) - debris_count
         return {
             "risks": scored[:limit],
             "total": len(scored),
-            "totalDebrisAnalyzed": len(scored),
-            "totalSatellitesUsed": 0,
+            "totalDebrisAnalyzed": debris_count,
+            "totalSatellitesUsed": active_count,
             "resultsReturned": min(limit, len(scored)),
             "cosmos2251Count": cosmos_count,
             "iridium33Count": iridium_count,

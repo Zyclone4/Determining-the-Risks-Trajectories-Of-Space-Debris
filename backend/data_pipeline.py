@@ -47,6 +47,9 @@ PROTOTYPE_QUERIES = [
     "/DECAY_DATE/null-val/orderby/NORAD_CAT_ID/format/json",
     "/class/gp/OBJECT_NAME/~~IRIDIUM 33/OBJECT_TYPE/DEBRIS"
     "/DECAY_DATE/null-val/orderby/NORAD_CAT_ID/format/json",
+    # Active satellites in same orbital shell (600-900km LEO)
+    "/class/gp/OBJECT_TYPE/PAYLOAD/DECAY_DATE/null-val"
+    "/MEAN_MOTION/13--15/orderby/NORAD_CAT_ID/limit/500/format/json",
 ]
 
 FULL_QUERY = [
@@ -490,8 +493,52 @@ def compute_features(records, norad_ids, all_pos, all_vel):
     all_pos[invalid] = np.nan
     all_vel[invalid] = np.nan
 
+    # Separate debris and active satellite indices
+    debris_mask = np.array([
+        record_map.get(nid, {}).get("OBJECT_TYPE", "") == "DEBRIS"
+        for nid in norad_ids
+    ], dtype=bool)
+    active_mask = ~debris_mask
+    debris_idx = np.where(debris_mask)[0]
+    active_idx = np.where(active_mask)[0]
+    logger.info("Separated %d debris and %d active satellites",
+                len(debris_idx), len(active_idx))
+
     logger.info("Computing nearest approach via KD-Tree (%d steps)...", n_steps)
-    nearest_approach = _nearest_approach_kdtree(all_pos)
+    nearest_approach_all = _nearest_approach_kdtree(all_pos)
+
+    # Initialize pairwise TCA features
+    n_debris = len(debris_idx)
+    min_miss = np.full(n_debris, 1e50)
+    tca_delta_pos = np.full((n_debris, 3), 1e50)
+    tca_delta_vel = np.full((n_debris, 3), 1e50)
+
+    if len(active_idx) > 0:
+        for t in range(n_steps):
+            active_pts = all_pos[active_idx, t, :]
+            active_vel_pts = all_vel[active_idx, t, :]
+            valid_active = ~np.any(np.isnan(active_pts), axis=1)
+            if valid_active.sum() < 1:
+                continue
+            tree = cKDTree(active_pts[valid_active])
+            valid_active_local = np.where(valid_active)[0]
+            for i, di in enumerate(debris_idx):
+                dp = all_pos[di, t, :]
+                dv = all_vel[di, t, :]
+                if np.any(np.isnan(dp)):
+                    continue
+                dd, nn = tree.query(dp.reshape(1, 3), k=1)
+                dist = float(dd[0])
+                if dist < min_miss[i]:
+                    min_miss[i] = dist
+                    nearest_local = valid_active_local[int(nn[0])]
+                    nearest_global = active_idx[nearest_local]
+                    tca_delta_pos[i] = dp - all_pos[nearest_global, t, :]
+                    tca_delta_vel[i] = dv - all_vel[nearest_global, t, :]
+
+    min_miss[min_miss >= 1e50] = np.nan
+    tca_delta_pos[tca_delta_pos >= 1e50] = np.nan
+    tca_delta_vel[tca_delta_vel >= 1e50] = np.nan
 
     min_altitude = np.where(
     np.all(np.isnan(altitudes), axis=1),
@@ -501,7 +548,7 @@ def compute_features(records, norad_ids, all_pos, all_vel):
 
     mean_alt = np.nanmean(altitudes, axis=1)
     logger.info("Computing orbital shell density (±%d km)...", SHELL_BAND_KM)
-    shell_density = _shell_density(mean_alt)
+    shell_density_all = _shell_density(mean_alt)
 
     debris_status = np.array([
         1 if record_map.get(nid, {}).get("OBJECT_TYPE", "") == "DEBRIS" else 0
@@ -514,7 +561,18 @@ def compute_features(records, norad_ids, all_pos, all_vel):
     ], dtype=np.float64)
 
     logger.info("Features computed for %d objects", n_obj)
-    return nearest_approach, min_altitude, shell_density, debris_status, decay_rate, altitudes
+    return {
+    "nearest_approach": nearest_approach_all,
+    "min_altitude": min_altitude,
+    "shell_density": shell_density_all,
+    "debris_status": debris_status,
+    "decay_rate": decay_rate,
+    "altitudes": altitudes,
+    "tca_delta_pos": tca_delta_pos,
+    "tca_delta_vel": tca_delta_vel,
+    "debris_idx": debris_idx,
+    "active_idx": active_idx,
+}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -543,10 +601,23 @@ def build_and_save_dataset(
         logger.error("No objects to build dataset from")
         return None
 
-    (nearest_approach, min_altitude, shell_density,
-     debris_status, decay_rate, altitudes) = compute_features(
-        records, norad_ids, all_pos, all_vel,
-    )
+    feat = compute_features(records, norad_ids, all_pos, all_vel)
+    nearest_approach = feat["nearest_approach"]
+    min_altitude = feat["min_altitude"]
+    shell_density = feat["shell_density"]
+    debris_status = feat["debris_status"]
+    decay_rate = feat["decay_rate"]
+    altitudes = feat["altitudes"]
+    tca_delta_pos = feat["tca_delta_pos"]
+    tca_delta_vel = feat["tca_delta_vel"]
+    debris_idx = feat["debris_idx"]
+
+    # Expand pairwise features from debris-only to all objects
+    delta_pos_full = np.full((n_obj, 3), np.nan)
+    delta_vel_full = np.full((n_obj, 3), np.nan)
+    if len(debris_idx) > 0:
+        delta_pos_full[debris_idx] = tca_delta_pos
+        delta_vel_full[debris_idx] = tca_delta_vel
 
     logger.info("Assembling DataFrame (%d objects × %d steps = %s rows)",
                 n_obj, n_steps, f"{n_obj * n_steps:,}")
@@ -577,6 +648,12 @@ def build_and_save_dataset(
         "shell_density": np.repeat(shell_density, n_steps),
         "debris_status": np.repeat(debris_status, n_steps),
         "decay_rate": np.repeat(decay_rate, n_steps),
+        "delta_x_tca": np.repeat(delta_pos_full[:, 0], n_steps),
+        "delta_y_tca": np.repeat(delta_pos_full[:, 1], n_steps),
+        "delta_z_tca": np.repeat(delta_pos_full[:, 2], n_steps),
+        "delta_vx_tca": np.repeat(delta_vel_full[:, 0], n_steps),
+        "delta_vy_tca": np.repeat(delta_vel_full[:, 1], n_steps),
+        "delta_vz_tca": np.repeat(delta_vel_full[:, 2], n_steps),
     })
 
     df = df[df["min_altitude"].notna() & df["nearest_approach"].notna()].copy()
