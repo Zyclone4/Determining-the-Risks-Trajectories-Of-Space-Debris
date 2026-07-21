@@ -485,7 +485,15 @@ def compute_features(records, norad_ids, all_pos, all_vel):
     n_obj, n_steps, _ = all_pos.shape
     record_map = {r["NORAD_CAT_ID"]: r for r in records}
 
-    radii = np.sqrt(np.nansum(all_pos ** 2, axis=2))
+    # Safer altitude calculation preserving NaNs:
+    with np.errstate(invalid='ignore'):
+        radii = np.linalg.norm(all_pos, axis=2)
+        altitudes = radii - EARTH_RADIUS_KM
+    
+invalid = np.isnan(radii) | (altitudes < 0) | (altitudes > 50000)
+altitudes[invalid] = np.nan
+all_pos[invalid] = np.nan
+all_vel[invalid] = np.nan
     altitudes = radii - EARTH_RADIUS_KM
     # Mask physically impossible altitudes (below surface or above 50,000 km)
     invalid = (altitudes < 0) | (altitudes > 50000)

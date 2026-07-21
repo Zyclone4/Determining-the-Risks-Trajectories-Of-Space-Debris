@@ -867,7 +867,7 @@ def create_app():
                 "riskScore": risk,
                 "riskLabel": label,
                 "perigee": round(float(row["min_altitude"]), 1) if not pd.isna(row["min_altitude"]) else 0.0,
-                "apogee": round(float(row["min_altitude"]), 1) if not pd.isna(row["min_altitude"]) else 0.0,
+                "apogee":  round(float(row["min_altitude"]), 1) if not pd.isna(row["min_altitude"]) else 0.0,
                 "inclination": 0.0,
                 "shellDensity": int(row["shell_density"]) if not pd.isna(row["shell_density"]) else 0,
                 "closestApproach": round(float(row["nearest_approach"]), 2) if not pd.isna(row["nearest_approach"]) else 0.0,
