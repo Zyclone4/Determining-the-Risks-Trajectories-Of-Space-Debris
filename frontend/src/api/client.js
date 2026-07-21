@@ -16,6 +16,7 @@ export async function fetchDebrisData(opts = {}) {
   const params = {};
   if (opts.catalog) params.catalog = opts.catalog;
   if (opts.refresh) params.refresh = "true";
+  if (opts.startTime) params.start_time = opts.startTime; // Pass timeframe timestamp
   return (await api.get("/debris", { params })).data;
 }
 
@@ -32,6 +33,7 @@ export async function fetchRisks(opts = {}) {
   const params = {};
   if (opts.limit) params.limit = opts.limit;
   if (opts.minRisk) params.minRisk = opts.minRisk;
+  if (opts.startTime) params.start_time = opts.startTime; // Pass timeframe timestamp
   return (await api.get("/risks", { params })).data;
 }
 
