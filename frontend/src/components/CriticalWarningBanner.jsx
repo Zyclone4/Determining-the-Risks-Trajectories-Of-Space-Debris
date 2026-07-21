@@ -42,7 +42,7 @@ function DismissDropdown({ onDismissOne, onDismissAll }) {
             style={{ display: "block", width: "100%", padding: "8px 14px", background: "none", border: "none", color: "#c9d1d9", fontSize: 12, textAlign: "left", cursor: "pointer" }}
             onMouseEnter={e => e.target.style.background = "#21262d"}
             onMouseLeave={e => e.target.style.background = "none"}
-            onClick={() => { setOpen(false); onDismissOne(); }}
+            onClick={() => { setOpen(false); onDismissOne?.(); }}
           >
             Dismiss this object
           </button>
@@ -50,7 +50,7 @@ function DismissDropdown({ onDismissOne, onDismissAll }) {
             style={{ display: "block", width: "100%", padding: "8px 14px", background: "none", border: "none", color: "#f85149", fontSize: 12, textAlign: "left", cursor: "pointer" }}
             onMouseEnter={e => e.target.style.background = "#21262d"}
             onMouseLeave={e => e.target.style.background = "none"}
-            onClick={() => { setOpen(false); onDismissAll(); }}
+            onClick={() => { setOpen(false); onDismissAll?.(); }}
           >
             Dismiss all alerts
           </button>
@@ -97,7 +97,9 @@ export default function CriticalWarningBanner({
     return () => clearInterval(intervalRef.current);
   }, []);
 
-  const riskPct = Math.min(riskScore * 100, 100);
+  const safeRiskScore = Number(riskScore) || 0;
+  const riskPct = Math.min(safeRiskScore * 100, 100);
+  const nearestVal = nearestActive ?? missDistance;
 
   if (!showDetail) {
     return (
@@ -112,7 +114,7 @@ export default function CriticalWarningBanner({
               <span className="crit-banner__countdown mono">{formatCountdown(countdown)}</span>
             </div>
             <div className="crit-banner__message">
-              {message || `Conjunction predicted — risk score ${riskScore.toFixed(2)}. Closest approach in ${Math.ceil(countdown / 60)} min. Immediate maneuver window open.`}
+              {message || `Conjunction predicted — risk score ${safeRiskScore.toFixed(2)}. Closest approach in ${Math.ceil(countdown / 60)} min. Immediate maneuver window open.`}
             </div>
             <div className="crit-banner__meta">
               {approachAlt != null && <span><em>Approach Alt</em> {approachAlt} km</span>}
@@ -159,7 +161,7 @@ export default function CriticalWarningBanner({
           <div className="crit-detail__field">
             <span className="crit-detail__label">Risk Score</span>
             <div className="crit-detail__risk-row">
-              <span className="crit-detail__risk-val mono">{riskScore.toFixed(3)}</span>
+              <span className="crit-detail__risk-val mono">{safeRiskScore.toFixed(3)}</span>
               <span className="pill pill-red">Critical</span>
             </div>
             <div className="metric-bar" style={{ marginTop: 6 }}>
@@ -177,34 +179,34 @@ export default function CriticalWarningBanner({
           {minPropAlt != null && <DetailField label="Min Propagated Alt" value={`${minPropAlt} km`} />}
           <DetailField
             label="Nearest Active Object"
-            value={nearestActive || "not observed"}
-            highlight={nearestActive && parseFloat(nearestActive) < 50}
+            value={nearestVal != null ? (String(nearestVal).includes("km") ? nearestVal : `${nearestVal} km`) : "not observed"}
+            highlight={nearestVal != null && parseFloat(nearestVal) < 50}
           />
           <DetailField label="Shell Density" value={shellDensity ?? "—"} />
         </div>
       </div>
-     <div className="crit-detail__footer">
-      <div style={{ paddingBottom: 16 }}>
-        <span className="crit-detail__basis">
-          <em>Risk basis:</em> {riskBasis || "Keplerian fallback nearest-active approach + altitude envelope"}
-        </span>
-      </div>
-      <div style={{ borderTop: "1px solid rgba(248, 81, 73, 0.2)", paddingTop: 14 }}>
-      <div className="crit-banner__actions">
-          <div className="crit-banner__actions-left">
-            <button className="btn btn-ghost" onClick={() => setShowDetail(false)}>Collapse ↑</button>
-            <DismissDropdown onDismissOne={onDismissOne} onDismissAll={onDismiss} />
-          </div>
-          {totalCount > 1 && (
-            <div className="crit-banner__nav">
-              <button className="btn btn-ghost" onClick={onPrev} disabled={currentIndex === 0}>←</button>
-              <span className="mono crit-banner__nav-count">{currentIndex + 1} / {totalCount}</span>
-              <button className="btn btn-ghost" onClick={onNext} disabled={currentIndex === totalCount - 1}>→</button>
+      <div className="crit-detail__footer">
+        <div style={{ paddingBottom: 16 }}>
+          <span className="crit-detail__basis">
+            <em>Risk basis:</em> {riskBasis || "Keplerian fallback nearest-active approach + altitude envelope"}
+          </span>
+        </div>
+        <div style={{ borderTop: "1px solid rgba(248, 81, 73, 0.2)", paddingTop: 14 }}>
+          <div className="crit-banner__actions">
+            <div className="crit-banner__actions-left">
+              <button className="btn btn-ghost" onClick={() => setShowDetail(false)}>Collapse ↑</button>
+              <DismissDropdown onDismissOne={onDismissOne} onDismissAll={onDismiss} />
             </div>
-          )}
+            {totalCount > 1 && (
+              <div className="crit-banner__nav">
+                <button className="btn btn-ghost" onClick={onPrev} disabled={currentIndex === 0}>←</button>
+                <span className="mono crit-banner__nav-count">{currentIndex + 1} / {totalCount}</span>
+                <button className="btn btn-ghost" onClick={onNext} disabled={currentIndex === totalCount - 1}>→</button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
-    </div>
     </div>
   );
 }

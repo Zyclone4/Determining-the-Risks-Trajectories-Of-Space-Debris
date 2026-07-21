@@ -179,7 +179,9 @@ function App() {
           name={criticalObj.name}
           riskScore={criticalObj.riskScore ?? 0}
           approachAlt={criticalObj.position?.geodetic?.altitude?.toFixed?.(0)}
-          missDistance={criticalObj.closestApproach?.toFixed?.(1)}
+          /* Pass both so whichever prop your banner uses gets the number */
+          missDistance={criticalObj.closestApproach?.toFixed?.(1) ?? criticalObj.missDistance?.toFixed?.(1)}
+          closestApproach={criticalObj.closestApproach?.toFixed?.(1) ?? criticalObj.missDistance?.toFixed?.(1)}
           relVelocity={criticalObj.relVelocity?.toFixed?.(2)}
           inclination={criticalObj.inclination?.toFixed?.(2)}
           group={criticalObj.catalog}
@@ -192,8 +194,8 @@ function App() {
           onPrev={() => setCriticalIndex(i => Math.max(0, i - 1))}
           onNext={() => setCriticalIndex(i => Math.min(criticalObjects.length - 1, i + 1))}
           onDismissOne={() => {
-              setDismissedObjects(prev => new Set([...prev, criticalObj.noradId]));
-              setCriticalIndex(i => Math.min(i, criticalObjects.length - 2));
+            setDismissedObjects(prev => new Set([...prev, criticalObj.noradId]));
+            setCriticalIndex(i => Math.min(i, criticalObjects.length - 2));
           }}
           onDismiss={() => setDismissedBanner(true)}
         />

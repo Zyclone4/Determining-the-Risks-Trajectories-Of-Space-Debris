@@ -11,6 +11,7 @@ export default function ObjectDetailModal({ object, onClose }) {
   if (!object) return null;
   const rl = riskLabel(object.riskScore ?? 0);
   const alt = object.position?.geodetic?.altitude ?? object.altitude ?? 0;
+  const closest = object.closestApproach ?? object.missDistance ?? object.closest_approach;
   return (
     <div className="obj-detail__overlay" onClick={onClose}>
       <div className="obj-detail fade-in dark-card" onClick={e => e.stopPropagation()}>
@@ -50,7 +51,9 @@ export default function ObjectDetailModal({ object, onClose }) {
           </div>
           <div className="obj-detail__field">
             <span className="obj-detail__label">Nearest active object</span>
-            <span className="obj-detail__value mono">{object.closestApproach != null ? `${object.closestApproach.toFixed(1)} km` : "not observed"}</span>
+            <span className="obj-detail__value mono">
+              {closest != null ? `${Number(closest).toFixed(1)} km` : "not observed"}
+            </span>
           </div>
           <div className="obj-detail__field">
             <span className="obj-detail__label">Shell density</span>
