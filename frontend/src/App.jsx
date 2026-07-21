@@ -69,28 +69,24 @@ function App() {
   }, [backendOnline]);
 
   // ── Analyze handler ──
-  // In App.jsx — update handleAnalyze definition:
-const handleAnalyze = useCallback(async (startTime) => {
-  setIsLoading(true);
-  setError(null);
-  setDismissedBanner(false);
-  try {
-    // Format timestamp if passed, or default to now
-    const timeframeIso = startTime ? new Date(startTime).toISOString() : new Date().toISOString();
-
-    const [debris, risks] = await Promise.all([
-      fetchDebrisData({ startTime: timeframeIso }),
-      fetchRisks({ limit: 100000, startTime: timeframeIso }),
-    ]);
-    setDebrisData(debris);
-    setRiskData(risks);
-    setLastUpdate(new Date().toISOString());
-  } catch (err) {
-    setError(`Failed to load data: ${err.message}`);
-  } finally {
-    setIsLoading(false);
-  }
-}, []);
+  const handleAnalyze = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    setDismissedBanner(false);
+    try {
+      const [debris, risks] = await Promise.all([
+        fetchDebrisData(),
+        fetchRisks({ limit: 100000 }),
+      ]);
+      setDebrisData(debris);
+      setRiskData(risks);
+      setLastUpdate(new Date().toISOString());
+    } catch (err) {
+      setError(`Failed to load data: ${err.message}`);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
 
   // ── Select object ──
   // Globe click — only sets trajectory, no modal
@@ -232,9 +228,7 @@ const handleAnalyze = useCallback(async (startTime) => {
                 <div className="globe-prompt glass-card">
                   <h2>🛰️ Space Debris Dashboard</h2>
                   <p>Click <strong>Analyze Orbits</strong> to load orbital data from Space-Track.org and begin risk analysis.</p>
-                  <button className="btn btn-primary" onClick={() => handleAnalyze(new Date())}>
-                    🚀 Analyze Orbits
-                  </button>
+                  <button className="btn btn-primary" onClick={handleAnalyze}>🚀 Analyze Orbits</button>
                 </div>
               </div>
             )}
