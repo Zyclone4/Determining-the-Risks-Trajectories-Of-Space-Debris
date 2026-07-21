@@ -490,10 +490,10 @@ def compute_features(records, norad_ids, all_pos, all_vel):
         radii = np.linalg.norm(all_pos, axis=2)
         altitudes = radii - EARTH_RADIUS_KM
     
-invalid = np.isnan(radii) | (altitudes < 0) | (altitudes > 50000)
-altitudes[invalid] = np.nan
-all_pos[invalid] = np.nan
-all_vel[invalid] = np.nan
+    invalid = np.isnan(radii) | (altitudes < 0) | (altitudes > 50000)
+    altitudes[invalid] = np.nan
+    all_pos[invalid] = np.nan
+    all_vel[invalid] = np.nan
     altitudes = radii - EARTH_RADIUS_KM
     # Mask physically impossible altitudes (below surface or above 50,000 km)
     invalid = (altitudes < 0) | (altitudes > 50000)
