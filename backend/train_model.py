@@ -813,7 +813,15 @@ def create_app():
         if not tle_path.exists():
             return {}
         records = json.loads(tle_path.read_text())
-        return {int(r["NORAD_CAT_ID"]): r.get("OBJECT_NAME", "UNKNOWN") for r in records}
+        return {
+            int(r["NORAD_CAT_ID"]): {
+                "name": r.get("OBJECT_NAME", "UNKNOWN"),
+                "inclination": float(r.get("INCLINATION", 0) or 0),
+                "apoapsis": float(r.get("APOAPSIS", 0) or 0),
+                "periapsis": float(r.get("PERIAPSIS", 0) or 0),
+            }
+            for r in records
+        }
 
     @app.get("/model-diagnostics")
     async def model_diagnostics():
@@ -847,11 +855,22 @@ def create_app():
         else:
             obj["gru_risk_score"] = 0.0
         obj = obj.dropna(subset=["min_altitude", "nearest_approach"])
+        # Compute max_altitude per object from full dataframe
+        max_alt = df.groupby("NORAD_CAT_ID")["altitude"].max().reset_index()
+        max_alt.columns = ["NORAD_CAT_ID", "max_altitude"]
+        obj = obj.merge(max_alt, on="NORAD_CAT_ID", how="left")
         name_map = _load_name_map()
         scored = []
         for _, row in obj.iterrows():
             norad = int(row["NORAD_CAT_ID"])
-            name = name_map.get(norad, "UNKNOWN")
+            obj_info = name_map.get(norad, {})
+            norad = int(row["NORAD_CAT_ID"])
+            obj_info = name_map.get(norad, {})
+            if norad == 36470:
+                print("DEBUG 36470", repr(norad), "type_in_map:", [type(k) for k in list(name_map.keys())[:3]], "→", obj_info)
+            name = obj_info.get("name", "UNKNOWN") if isinstance(obj_info, dict) else obj_info
+            inclination = obj_info.get("inclination", 0.0) if isinstance(obj_info, dict) else 0.0
+            apoapsis = obj_info.get("apoapsis", 0.0) if isinstance(obj_info, dict) else 0.0
             risk = round(float(row["gru_risk_score"]), 4)
             if risk < minRisk:
                 continue
@@ -867,8 +886,8 @@ def create_app():
                 "riskScore": risk,
                 "riskLabel": label,
                 "perigee": round(float(row["min_altitude"]), 1) if not pd.isna(row["min_altitude"]) else 0.0,
-                "apogee":  round(float(row["min_altitude"]), 1) if not pd.isna(row["min_altitude"]) else 0.0,
-                "inclination": 0.0,
+                "apogee": round(float(row["max_altitude"]), 1) if not pd.isna(row.get("max_altitude", float("nan"))) else 0.0,
+                "inclination": round(inclination, 2),
                 "shellDensity": int(row["shell_density"]) if not pd.isna(row["shell_density"]) else 0,
                 "closestApproach": round(float(row["nearest_approach"]), 2) if not pd.isna(row["nearest_approach"]) else 0.0,
                 "objectType": "Debris" if int(row.get("debris_status", 1)) == 1 else "Payload",
@@ -903,8 +922,6 @@ def create_app():
         df["NORAD_CAT_ID"] = df["NORAD_CAT_ID"].astype(str)
         obj = df.drop_duplicates(subset="NORAD_CAT_ID").copy()
         name_map = _load_name_map()
-        cosmos_ids = [str(k) for k, v in name_map.items() if "COSMOS" in v]
-        iridium_ids = [str(k) for k, v in name_map.items() if "IRIDIUM" in v]
         cosmos = obj[obj["NORAD_CAT_ID"].isin(cosmos_ids)]
         iridium = obj[obj["NORAD_CAT_ID"].isin(iridium_ids)]
         return {

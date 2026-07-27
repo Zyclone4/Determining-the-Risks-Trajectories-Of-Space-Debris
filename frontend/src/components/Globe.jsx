@@ -231,7 +231,6 @@ export default function Globe({
       }, 100);
       return () => clearInterval(id);
     }, [playing, totalSteps]);
-  console.log('Globe trajectoryPoints:', trajectoryPoints.length, 'selectedObjectId:', selectedObjectId);
   const currentPt = trajectoryPoints[step];
   const hoursIn = ((step * 5) / 60).toFixed(1);
   const thumbColor = RISK_LINE_COLORS[selectedObjectRisk] || "#388bfd";
