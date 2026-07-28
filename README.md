@@ -7,14 +7,13 @@ collisions increases. Even small fragments can travel at speeds greater than
 7 km/s, capable of causing severe damage to spacecraft and space missions.
 
 This project provides a dashboard that visualizes debris trajectories and
-flags high-risk objects, using orbital data pulled from Space-Track and
-CelesTrak, propagated with SGP4, and scored for collision risk with a
-trained model.
+flags high-risk objects, using orbital data pulled from Space-Track,
+propagated with SGP4, and scored for collision risk with a trained model.
 
 ## Goal
 
 Generate a dashboard that visualizes debris trajectories and marks
-high-risk objects, using data acquired from Space-Track and processed
+high-risk objects using data acquired from Space-Track and processed
 through a trained risk-scoring pipeline.
 
 ## What It Does
