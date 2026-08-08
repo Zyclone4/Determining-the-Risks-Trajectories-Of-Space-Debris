@@ -882,6 +882,7 @@ def create_app():
                 "inclination": round(inclination, 2),
                 "shellDensity": int(row["shell_density"]) if not pd.isna(row["shell_density"]) else 0,
                 "closestApproach": round(float(row["nearest_approach"]), 2) if not pd.isna(row["nearest_approach"]) else 0.0,
+                "nearestActive": round(float(row["nearest_active"]), 2) if not pd.isna(row.get("nearest_active", float("nan"))) else None,
                 "objectType": "Debris" if int(row.get("debris_status", 1)) == 1 else "Payload",
                 "source": name,
                 "catalog": name if name != "UNKNOWN" else "Unknown",

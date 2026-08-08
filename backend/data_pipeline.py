@@ -571,6 +571,7 @@ def compute_features(records, norad_ids, all_pos, all_vel):
     logger.info("Features computed for %d objects", n_obj)
     return {
     "nearest_approach": nearest_approach_all,
+    "min_miss": min_miss,
     "min_altitude": min_altitude,
     "shell_density": shell_density_all,
     "debris_status": debris_status,
@@ -623,9 +624,11 @@ def build_and_save_dataset(
     # Expand pairwise features from debris-only to all objects
     delta_pos_full = np.full((n_obj, 3), np.nan)
     delta_vel_full = np.full((n_obj, 3), np.nan)
+    min_miss_full = np.full(n_obj, np.nan)
     if len(debris_idx) > 0:
         delta_pos_full[debris_idx] = tca_delta_pos
         delta_vel_full[debris_idx] = tca_delta_vel
+        min_miss_full[debris_idx] = feat["min_miss"]
 
     logger.info("Assembling DataFrame (%d objects × %d steps = %s rows)",
                 n_obj, n_steps, f"{n_obj * n_steps:,}")
@@ -662,6 +665,7 @@ def build_and_save_dataset(
         "delta_vx_tca": np.repeat(delta_vel_full[:, 0], n_steps),
         "delta_vy_tca": np.repeat(delta_vel_full[:, 1], n_steps),
         "delta_vz_tca": np.repeat(delta_vel_full[:, 2], n_steps),
+        "nearest_active": np.repeat(min_miss_full, n_steps),
     })
 
     df = df[df["min_altitude"].notna() & df["nearest_approach"].notna()].copy()

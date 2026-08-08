@@ -182,6 +182,7 @@ function App() {
           /* Pass both so whichever prop your banner uses gets the number */
           missDistance={criticalObj.closestApproach?.toFixed?.(1) ?? criticalObj.missDistance?.toFixed?.(1)}
           closestApproach={criticalObj.closestApproach?.toFixed?.(1) ?? criticalObj.missDistance?.toFixed?.(1)}
+          nearestActive={criticalObj.nearestActive?.toFixed?.(2)}
           relVelocity={criticalObj.relVelocity?.toFixed?.(2)}
           inclination={criticalObj.inclination?.toFixed?.(2)}
           group={criticalObj.catalog}
