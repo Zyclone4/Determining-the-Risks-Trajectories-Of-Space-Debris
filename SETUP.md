@@ -10,7 +10,7 @@
 ## 1. Environment Setup
 
 ```bash
-cd ~/Documents/SuperSafeLLC2
+cd ~/Documents/SpaceDebris
 brew install python@3.12
 python3 -m venv .venv
 source .venv/bin/activate
@@ -20,7 +20,7 @@ pip install -r requirements.txt
 ## 2. Terminal 1 — Data Pipeline & Model Training
 
 ```bash
-cd ~/Documents/SuperSafeLLC2/backend
+cd ~/Documents/SpaceDebris/backend
 python3 data_pipeline.py --propagate --force
 python3 train_model.py
 ```
@@ -32,7 +32,7 @@ you want fresh data or a retrained model.
 ## 3. Terminal 2 — Backend API Server
 
 ```bash
-cd ~/Documents/SuperSafeLLC2/backend
+cd ~/Documents/SpaceDebris/backend
 lsof -ti:8000 | xargs kill -9   # clears anything already using port 8000
 python3 train_model.py --serve
 ```
@@ -56,7 +56,7 @@ that no old server process is still holding port 8000 — run
 ## 4. Terminal 3 — Frontend
 
 ```bash
-cd ~/Documents/SuperSafeLLC2/frontend
+cd ~/Documents/SpaceDebris/frontend
 npm install
 npm run dev
 ```
