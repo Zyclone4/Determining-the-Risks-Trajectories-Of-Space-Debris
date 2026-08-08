@@ -808,6 +808,13 @@ def create_app():
         allow_headers=["*"],
     )
 
+    from pydantic import BaseModel
+    from datetime import datetime
+    from data_pipeline import load_cache, build_and_save_dataset
+
+    class AnalyzeRequest(BaseModel):
+        startTime: str
+
     def _load_name_map():
         tle_path = CACHE_DIR / "tle_raw.json"
         if not tle_path.exists():
@@ -907,6 +914,93 @@ def create_app():
             "resultsReturned": min(limit, len(scored)),
             "cosmos2251Count": cosmos_count,
             "iridium33Count": iridium_count,
+        }
+
+    @app.post("/api/analyze")
+    async def analyze(req: AnalyzeRequest):
+        try:
+            custom_t0 = datetime.fromisoformat(req.startTime.replace("Z", "+00:00"))
+        except ValueError:
+            return {"error": f"Invalid startTime format: {req.startTime}"}
+
+        records = load_cache()
+        if records is None:
+            return {"error": "No cached TLE data available. Run data_pipeline.py first."}
+
+        live_path = CACHE_DIR / "propagated_features_live.parquet"
+        df = build_and_save_dataset(records, t0=custom_t0, output_path=live_path)
+        if df is None:
+            return {"error": "Propagation failed for the given start time."}
+
+        model_path = MODEL_DIR / "best_model.pth"
+        if not model_path.exists():
+            return {"error": "No trained model found. Run train_model.py first."}
+
+        model = DebrisRiskGRU()
+        model.load_state_dict(torch.load(model_path, map_location="cpu"))
+        model.eval()
+
+        df["NORAD_CAT_ID"] = df["NORAD_CAT_ID"].astype(str)
+        obj = df.drop_duplicates(subset="NORAD_CAT_ID").copy()
+        max_alt = df.groupby("NORAD_CAT_ID")["altitude"].max().reset_index()
+        max_alt.columns = ["NORAD_CAT_ID", "max_altitude"]
+        obj = obj.merge(max_alt, on="NORAD_CAT_ID", how="left")
+        obj = obj.dropna(subset=["min_altitude", "nearest_approach"])
+
+        name_map = _load_name_map()
+
+        all_scores = {}
+        with torch.no_grad():
+            for nid, group in df.groupby("NORAD_CAT_ID"):
+                if group["debris_status"].iloc[0] != 1:
+                    continue
+                group_sorted = group.sort_values("step")
+                feats = np.nan_to_num(
+                    group_sorted[GRU_FEATURES].values, nan=0.0
+                ).astype(np.float32)
+                x = torch.from_numpy(feats).unsqueeze(0)
+                pred = model(x).squeeze(0).numpy()
+                all_scores[str(nid)] = float(np.clip(np.max(pred), 0.0, 1.0))
+
+        scored = []
+        for _, row in obj.iterrows():
+            norad = int(row["NORAD_CAT_ID"])
+            obj_info = name_map.get(norad, {})
+            name = obj_info.get("name", "UNKNOWN")
+            inclination = obj_info.get("inclination", 0.0)
+
+            risk = round(all_scores.get(str(norad), 0.0), 4)
+            if risk >= 0.70:
+                label = "Critical"
+            elif risk >= 0.45:
+                label = "Watch"
+            else:
+                label = "Safe"
+
+            scored.append({
+                "noradId": norad,
+                "name": name,
+                "riskScore": risk,
+                "riskLabel": label,
+                "perigee": round(float(row["min_altitude"]), 1) if not pd.isna(row["min_altitude"]) else 0.0,
+                "apogee": round(float(row["max_altitude"]), 1) if not pd.isna(row.get("max_altitude", float("nan"))) else 0.0,
+                "inclination": round(inclination, 2),
+                "shellDensity": int(row["shell_density"]) if not pd.isna(row["shell_density"]) else 0,
+                "closestApproach": round(float(row["nearest_approach"]), 2) if not pd.isna(row["nearest_approach"]) else 0.0,
+                "nearestActive": round(float(row["nearest_active"]), 2) if not pd.isna(row.get("nearest_active", float("nan"))) else None,
+                "objectType": "Debris" if int(row.get("debris_status", 1)) == 1 else "Payload",
+                "source": name,
+                "catalog": name if name != "UNKNOWN" else "Unknown",
+            })
+
+        scored.sort(key=lambda x: x["riskScore"], reverse=True)
+
+        return {
+            "risks": scored,
+            "total": len(scored),
+            "startTime": req.startTime,
+            "scoredWithOriginalModel": True,
+            "note": "Scored using the current model, not retrained for this time window.",
         }
 
     @app.get("/api/debris")
