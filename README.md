@@ -31,7 +31,7 @@ through a trained risk-scoring pipeline.
 ## Project Structure
 
 ```
-SuperSafeLLC2/
+SpaceDebris/
 ├── backend/
 │   ├── data_pipeline.py   # Fetches TLE data, runs SGP4 propagation, builds feature dataset
 │   ├── train_model.py     # Trains the risk-scoring model and serves the FastAPI backend
