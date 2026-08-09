@@ -21,7 +21,7 @@ import "./App.css";
 // Default toggles
 const DEFAULT_TOGGLES = {
   top50: true, grid: false, ellipses: false, velocity: false,
-  activeSats: true, debris: true, conjunctions: true,
+  activeSats: false, debris: true, conjunctions: false,
 };
 
 // Source group color map
@@ -146,12 +146,29 @@ function App() {
 
   // Globe objects (filtered by toggles)
   const globeObjects = useMemo(() => {
-    let items = [...allRisks];
+    const debrisOnly = allRisks.filter(r => r.objectType !== "Payload");
+    const activeOnly = allRisks.filter(r => r.objectType === "Payload");
+
+    let debrisItems = debrisOnly;
     if (toggles.top50) {
-      items = items.sort((a, b) => (b.riskScore ?? 0) - (a.riskScore ?? 0)).slice(0, 50);
+      debrisItems = [...debrisOnly].sort((a, b) => (b.riskScore ?? 0) - (a.riskScore ?? 0)).slice(0, 50);
     }
-    return items;
-  }, [allRisks, toggles.top50]);
+
+    const activeItems = toggles.activeSats ? activeOnly : [];
+    let finalDebris = toggles.debris ? debrisItems : [];
+
+    if (toggles.src_cosmos2251 === false) {
+      finalDebris = finalDebris.filter(r => !(r.name || "").includes("COSMOS 2251"));
+    }
+    if (toggles.src_iridium33 === false) {
+      finalDebris = finalDebris.filter(r => !(r.name || "").includes("IRIDIUM 33"));
+    }
+    if (toggles.conjunctions) {
+      finalDebris = finalDebris.filter(r => r.riskLabel === "Critical" || r.riskLabel === "Watch");
+    }
+
+    return [...finalDebris, ...activeItems];
+  }, [allRisks, toggles.top50, toggles.activeSats, toggles.debris, toggles.src_cosmos2251, toggles.src_iridium33, toggles.conjunctions]);
 
   // Critical object for banner
   const criticalObjects = useMemo(() => {

@@ -85,7 +85,8 @@ function DebrisPoints({ objects, onSelect, selectedId, trajectoryPoints, playbac
     }
     
     const pos = geoToCartesian(latitude, longitude, altitude);
-    const level = obj.riskLabel ? obj.riskLabel.toLowerCase() : riskLevel(obj.riskScore ?? 0);
+    const isActiveSatellite = obj.objectType === "Payload";
+    const level = isActiveSatellite ? "active" : (obj.riskLabel ? obj.riskLabel.toLowerCase() : riskLevel(obj.riskScore ?? 0));
     const color = RISK_COLORS[level] || RISK_COLORS.safe;
     const staticPos = geoToCartesian(obj.position.geodetic.latitude, obj.position.geodetic.longitude, obj.position.geodetic.altitude);
     return {
@@ -95,6 +96,7 @@ function DebrisPoints({ objects, onSelect, selectedId, trajectoryPoints, playbac
       staticPosition: staticPos,  // ← add this
       color,
       riskLevel: level,
+      objectType: obj.objectType,
       riskScore: obj.riskScore,
       altitude,
       isSelected,
