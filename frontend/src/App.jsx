@@ -224,6 +224,9 @@ function App() {
           missDistance={criticalObj.closestApproach?.toFixed?.(1) ?? criticalObj.missDistance?.toFixed?.(1)}
           closestApproach={criticalObj.closestApproach?.toFixed?.(1) ?? criticalObj.missDistance?.toFixed?.(1)}
           nearestActive={criticalObj.nearestActive?.toFixed?.(2)}
+          countdownSeconds={criticalObj.minutesToApproach != null ? criticalObj.minutesToApproach * 60 : undefined}
+          closestApproachObject={criticalObj.closestApproachObject}
+          closestApproachObjectId={criticalObj.closestApproachObjectId}
           relVelocity={criticalObj.relVelocity?.toFixed?.(2)}
           inclination={criticalObj.inclination?.toFixed?.(2)}
           group={criticalObj.catalog}

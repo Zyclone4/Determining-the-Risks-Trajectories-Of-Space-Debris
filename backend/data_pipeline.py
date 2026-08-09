@@ -451,24 +451,27 @@ def propagate_all(records, t0=None, horizon_hours=HORIZON_HOURS,
 def _nearest_approach_kdtree(all_pos):
     n_obj, n_steps, _ = all_pos.shape
     min_dist = np.full(n_obj, 1e50)
-
+    min_dist_step = np.full(n_obj, -1, dtype=np.int32)
+    min_dist_partner = np.full(n_obj, -1, dtype=np.int32)
     for t in range(n_steps):
         pts = all_pos[:, t, :]
         valid_mask = ~np.any(np.isnan(pts), axis=1)
         n_valid = valid_mask.sum()
         if n_valid < 2:
             continue
-
         valid_idx = np.where(valid_mask)[0]
         tree = cKDTree(pts[valid_mask])
-        dd, _ = tree.query(pts[valid_mask], k=2)
+        dd, ii = tree.query(pts[valid_mask], k=2)
         nearest = dd[:, 1]
+        nearest_local_idx = ii[:, 1]
+        nearest_global_idx = valid_idx[nearest_local_idx]
+        improved = nearest < min_dist[valid_idx]
         min_dist[valid_idx] = np.minimum(min_dist[valid_idx], nearest)
-
+        improved_global_idx = valid_idx[improved]
+        min_dist_step[improved_global_idx] = t
+        min_dist_partner[improved_global_idx] = nearest_global_idx[improved]
     min_dist[min_dist >= 1e50] = np.nan
-    return min_dist
-
-
+    return min_dist, min_dist_step, min_dist_partner
 def _shell_density(mean_alt, band_km=SHELL_BAND_KM):
     sorted_alt = np.sort(mean_alt[~np.isnan(mean_alt)])
     density = np.zeros(len(mean_alt), dtype=np.int32)
@@ -513,7 +516,7 @@ def compute_features(records, norad_ids, all_pos, all_vel):
                 len(debris_idx), len(active_idx))
 
     logger.info("Computing nearest approach via KD-Tree (%d steps)...", n_steps)
-    nearest_approach_all = _nearest_approach_kdtree(all_pos)
+    nearest_approach_all, nearest_approach_step, nearest_approach_partner = _nearest_approach_kdtree(all_pos)
 
     # Initialize pairwise TCA features
     n_debris = len(debris_idx)
@@ -571,6 +574,8 @@ def compute_features(records, norad_ids, all_pos, all_vel):
     logger.info("Features computed for %d objects", n_obj)
     return {
     "nearest_approach": nearest_approach_all,
+    "nearest_approach_step": nearest_approach_step,
+    "nearest_approach_partner": nearest_approach_partner,
     "min_miss": min_miss,
     "min_altitude": min_altitude,
     "shell_density": shell_density_all,
@@ -612,6 +617,13 @@ def build_and_save_dataset(
 
     feat = compute_features(records, norad_ids, all_pos, all_vel)
     nearest_approach = feat["nearest_approach"]
+    nearest_approach_step = feat["nearest_approach_step"]
+    nearest_approach_partner_idx = feat["nearest_approach_partner"]
+    norad_ids_arr = np.array(norad_ids, dtype=object)
+    nearest_approach_partner_id = np.array([
+        norad_ids_arr[idx] if idx >= 0 else None
+        for idx in nearest_approach_partner_idx
+    ], dtype=object)
     min_altitude = feat["min_altitude"]
     shell_density = feat["shell_density"]
     debris_status = feat["debris_status"]
@@ -655,6 +667,8 @@ def build_and_save_dataset(
         "VZ": vel_flat[:, 2],
         "altitude": alt_flat,
         "nearest_approach": np.repeat(nearest_approach, n_steps),
+        "nearest_approach_step": np.repeat(nearest_approach_step, n_steps),
+        "nearest_approach_partner": np.repeat(nearest_approach_partner_id, n_steps),
         "min_altitude": np.repeat(min_altitude, n_steps),
         "shell_density": np.repeat(shell_density, n_steps),
         "debris_status": np.repeat(debris_status, n_steps),
