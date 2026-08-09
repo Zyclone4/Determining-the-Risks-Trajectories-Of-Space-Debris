@@ -79,6 +79,8 @@ export default function CriticalWarningBanner({
   nearestActive,
   shellDensity,
   riskBasis,
+  closestApproachObject,
+  closestApproachObjectId,
   currentIndex = 0,
   totalCount = 1,
   onPrev,
@@ -88,6 +90,9 @@ export default function CriticalWarningBanner({
 }) {
   const [showDetail, setShowDetail] = useState(false);
   const [countdown, setCountdown] = useState(countdownSeconds);
+  useEffect(() => {
+    setCountdown(countdownSeconds);
+  }, [noradId, countdownSeconds]);
   const intervalRef = useRef(null);
 
   useEffect(() => {
@@ -114,7 +119,7 @@ export default function CriticalWarningBanner({
               <span className="crit-banner__countdown mono">{formatCountdown(countdown)}</span>
             </div>
             <div className="crit-banner__message">
-              {message || `Conjunction predicted — risk score ${safeRiskScore.toFixed(2)}. Closest approach in ${Math.ceil(countdown / 60)} min. Immediate maneuver window open.`}
+              {message || `Conjunction predicted with ${closestApproachObject || "unknown object"}${closestApproachObjectId ? ` (NORAD ${closestApproachObjectId})` : ""} — risk score ${safeRiskScore.toFixed(2)}. Closest approach in ${Math.ceil(countdown / 60)} min. Immediate maneuver window open.`}
             </div>
             <div className="crit-banner__meta">
               {approachAlt != null && <span><em>Approach Alt</em> {approachAlt} km</span>}
