@@ -1001,10 +1001,14 @@ def create_app():
             })
 
         scored.sort(key=lambda x: x["riskScore"], reverse=True)
+        debris_count = len([s for s in scored if s["objectType"] == "Debris"])
+        active_count = len(scored) - debris_count
 
         return {
             "risks": scored,
             "total": len(scored),
+            "totalDebrisAnalyzed": debris_count,
+            "totalSatellitesUsed": active_count,
             "startTime": req.startTime,
             "scoredWithOriginalModel": True,
             "note": "Scored using the current model, not retrained for this time window.",
