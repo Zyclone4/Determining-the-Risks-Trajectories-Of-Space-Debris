@@ -129,7 +129,7 @@ function DebrisPoints({ objects, onSelect, selectedId, trajectoryPoints, playbac
 // 1. Add 'Line' to your import from @react-three/drei at the top of Globe.jsx if it isn't there:
 // import { OrbitControls, Sphere, Stars, Html, Line } from "@react-three/drei";
 
-function TrajectoryLine({ points, color = "#06b6d4" }) {
+function TrajectoryLine({ points, color = "#06b6d4", orbitalPeriodMinutes = null }) {
   const linePoints = useMemo(() => {
     if (!Array.isArray(points) || points.length < 2) return [];
 
@@ -160,19 +160,23 @@ function TrajectoryLine({ points, color = "#06b6d4" }) {
     if (vectors.length < 2) return [];
 
     // 2. Slice to EXACTLY 1 orbit (~21 points) to prevent the tail from wrapping into revolution 2
-    const ONE_ORBIT_COUNT = Math.min(21, vectors.length);
+    const STEP_MINUTES_ESTIMATE = 5;
+    const computedOrbitCount = orbitalPeriodMinutes
+      ? Math.round(orbitalPeriodMinutes / STEP_MINUTES_ESTIMATE)
+      : 21;
+    const ONE_ORBIT_COUNT = Math.min(Math.max(computedOrbitCount, 3), vectors.length);
     const orbitSlice = vectors.slice(0, ONE_ORBIT_COUNT);
 
     if (orbitSlice.length < 3) return orbitSlice;
 
     // 3. Resample into a smooth, non-overlapping spline curve
     try {
-      const curve = new THREE.CatmullRomCurve3(orbitSlice, false, "centripetal");
+      const curve = new THREE.CatmullRomCurve3(orbitSlice, true, "centripetal");
       return curve.getPoints(70);
     } catch (e) {
       return orbitSlice;
     }
-  }, [points]);
+  }, [points, orbitalPeriodMinutes]);
 
   if (!linePoints || linePoints.length < 2) return null;
 
@@ -205,6 +209,7 @@ function PlaybackMarker({ points, stepIndex }) {
 export default function Globe({
   objects = [],
   trajectoryPoints = [],
+  orbitalPeriodMinutes = null,
   selectedObjectId,
   selectedObjectName,
   selectedObjectRisk,
@@ -281,6 +286,7 @@ export default function Globe({
             <TrajectoryLine
               points={trajectoryPoints}
               currentStep={step}
+              orbitalPeriodMinutes={orbitalPeriodMinutes}
               color={RISK_LINE_COLORS[selectedObjectRisk] || "#06b6d4"}
             />
           )}
@@ -328,7 +334,7 @@ export default function Globe({
           zIndex: 1000,
           lineHeight: 1.6,
         }}>
-          <div style={{ fontWeight: 600 }}>{objects.find(o => String(o.noradId) === String(selectedObjectId))?.name || "UNKNOWN"}</div>
+          <div style={{ fontWeight: 600 }}>{selectedObjectName || `Object ${selectedObjectId}`}</div>
           <div>NORAD {selectedObjectId} (Risk: {(objects.find(o => String(o.noradId) === String(selectedObjectId))?.riskScore ?? 0).toFixed(3)})</div>
         </div>
       )}

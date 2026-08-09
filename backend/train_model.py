@@ -1057,9 +1057,19 @@ def create_app():
                     "altitude": round(alt, 2),
                 }
             })
+        tle_path = CACHE_DIR / "tle_raw.json"
+        orbital_period_min = None
+        if tle_path.exists():
+            tle_records = json.loads(tle_path.read_text())
+            tle_match = next((r for r in tle_records if str(r.get("NORAD_CAT_ID")) == str(norad_id)), None)
+            if tle_match:
+                mean_motion = float(tle_match.get("MEAN_MOTION", 0) or 0)
+                if mean_motion > 0:
+                    orbital_period_min = 1440.0 / mean_motion
         return {
             "noradId": norad_id,
             "totalPoints": len(points),
+            "orbitalPeriodMinutes": orbital_period_min,
             "trajectoryPoints": points,
         }
 
