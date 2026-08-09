@@ -111,7 +111,7 @@ export default function TrackedObjectsTable({ risks = [], onSelectObject, select
                 { key: "noradId", label: "NORAD ID" },
                 { key: "name", label: "Source" },
                 { key: "riskScore", label: "Risk Score" },
-                { key: "closestApproach", label: "Approach" },
+                { key: "closestApproach", label: "Nearest Object" },
                 { key: "perigee", label: "Alt (km)" },
               ].map(col => (
                 <th

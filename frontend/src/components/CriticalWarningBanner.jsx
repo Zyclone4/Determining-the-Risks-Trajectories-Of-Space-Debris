@@ -123,7 +123,7 @@ export default function CriticalWarningBanner({
             </div>
             <div className="crit-banner__meta">
               {approachAlt != null && <span><em>Approach Alt</em> {approachAlt} km</span>}
-              {missDistance != null && <span><em>Miss Distance</em> {missDistance} km</span>}
+              {missDistance != null && <span><em>Nearest Object</em> {missDistance} km</span>}
               {relVelocity != null && <span><em>Relative Velocity</em> {relVelocity} km/s</span>}
               {inclination != null && <span><em>Inclination</em> {inclination}°</span>}
             </div>
@@ -173,7 +173,7 @@ export default function CriticalWarningBanner({
               <div className="metric-bar__fill metric-bar__fill--fail" style={{ width: `${riskPct}%` }} />
             </div>
           </div>
-          {missDistance != null && <DetailField label="Miss Distance" value={`${missDistance} km`} />}
+          {missDistance != null && <DetailField label="Nearest Object" value={`${missDistance} km`} />}
           {relVelocity != null && <DetailField label="Relative Velocity" value={`${relVelocity} km/s`} />}
           {approachAlt != null && <DetailField label="Approach Altitude" value={`${approachAlt} km`} />}
           {inclination != null && <DetailField label="Inclination" value={`${inclination}°`} />}
@@ -183,7 +183,7 @@ export default function CriticalWarningBanner({
           {apogee != null && <DetailField label="Apogee" value={`${apogee} km`} />}
           {minPropAlt != null && <DetailField label="Min Propagated Alt" value={`${minPropAlt} km`} />}
           <DetailField
-            label="Nearest Active Object"
+            label="Nearest Active Satellite"
             value={nearestVal != null ? (String(nearestVal).includes("km") ? nearestVal : `${nearestVal} km`) : "not observed"}
             highlight={nearestVal != null && parseFloat(nearestVal) < 50}
           />
