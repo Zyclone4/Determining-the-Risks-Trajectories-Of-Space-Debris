@@ -15,7 +15,7 @@ import RFDiagnosticsPanel from "./components/RFDiagnosticsPanel";
 import TrackedObjectsTable from "./components/TrackedObjectsTable";
 import ObjectDetailModal from "./components/ObjectDetailModal";
 import CriticalWarningBanner from "./components/CriticalWarningBanner";
-import { fetchDebrisData, fetchRisks, fetchTrajectory, checkHealth, fetchModelDiagnostics } from "./api/client";
+import { fetchDebrisData, fetchRisks, fetchTrajectory, checkHealth, fetchModelDiagnostics, fetchAnalyze } from "./api/client";
 import "./App.css";
 
 // Default toggles
@@ -46,6 +46,9 @@ function App() {
   
   // ── UI state ──
   const [isLoading, setIsLoading] = useState(false);
+  const [analysisNote, setAnalysisNote] = useState(null);
+  const [isCustomTimeframe, setIsCustomTimeframe] = useState(false);
+  const [trajectoryError, setTrajectoryError] = useState(null);
   const [backendOnline, setBackendOnline] = useState(false);
   const [lastUpdate, setLastUpdate] = useState(null);
   const [error, setError] = useState(null);
@@ -69,17 +72,19 @@ function App() {
   }, [backendOnline]);
 
   // ── Analyze handler ──
-  const handleAnalyze = useCallback(async () => {
+  const handleAnalyze = useCallback(async (customStartTime) => {
     setIsLoading(true);
     setError(null);
     setDismissedBanner(false);
     try {
       const [debris, risks] = await Promise.all([
         fetchDebrisData(),
-        fetchRisks({ limit: 100000 }),
+        customStartTime ? fetchAnalyze(customStartTime) : fetchRisks({ limit: 100000 }),
       ]);
       setDebrisData(debris);
       setRiskData(risks);
+      setAnalysisNote(customStartTime ? risks.note : null);
+      setIsCustomTimeframe(!!customStartTime);
       setLastUpdate(new Date().toISOString());
     } catch (err) {
       setError(`Failed to load data: ${err.message}`);
@@ -94,24 +99,28 @@ function App() {
     setSelectedObject(null);  // close modal
     setGlobeSelectedId(noradId);  // track for globe
     try {
-      const traj = await fetchTrajectory(noradId, { duration: 2880, interval: 5 });
+      const traj = await fetchTrajectory(noradId, { duration: 2880, interval: 5, useLive: isCustomTimeframe });
       setTrajectoryPoints(traj.trajectoryPoints || []);
+      setTrajectoryError(traj.error || (!traj.trajectoryPoints?.length ? "No propagation data available for this object at this time." : null));
     } catch {
       setTrajectoryPoints([]);
+      setTrajectoryError(null);
     }
-  }, []);
+  }, [isCustomTimeframe]);
 
   // Table click — full modal with all object data
   const handleTableSelect = useCallback(async (noradId) => {
     const obj = riskData?.risks?.find(r => String(r.noradId) === String(noradId));
     setSelectedObject(obj || { noradId });
     try {
-      const traj = await fetchTrajectory(noradId, { duration: 2880, interval: 5 });
+      const traj = await fetchTrajectory(noradId, { duration: 2880, interval: 5, useLive: isCustomTimeframe });
       setTrajectoryPoints(traj.trajectoryPoints || []);
+      setTrajectoryError(traj.error || (!traj.trajectoryPoints?.length ? "No propagation data available for this object at this time." : null));
     } catch {
       setTrajectoryPoints([]);
+      setTrajectoryError(null);
     }
-  }, [riskData]);
+  }, [riskData, isCustomTimeframe]);
 
   // ── Toggle handler ──
   const handleToggle = useCallback((key, val) => {
@@ -164,6 +173,18 @@ function App() {
         onAnalyze={handleAnalyze}
         isLoading={isLoading}
       />
+
+      {analysisNote && (
+        <div className="analysis-note" style={{
+          padding: "8px 16px",
+          fontSize: "13px",
+          color: "#9aa4b2",
+          background: "rgba(56, 139, 253, 0.08)",
+          borderBottom: "1px solid rgba(56, 139, 253, 0.2)",
+        }}>
+          ⓘ {analysisNote}
+        </div>
+      )}
 
       {/* ── Stat Boxes ── */}
       <StatBoxes
@@ -223,6 +244,13 @@ function App() {
               showGrid={toggles.grid}
             />
 
+            {trajectoryError && (
+              <div className="globe-overlay" style={{ pointerEvents: "none" }}>
+                <div className="glass-card" style={{ padding: "10px 18px", fontSize: "13px", color: "#e6a23c" }}>
+                  ⚠️ {trajectoryError}
+                </div>
+              </div>
+            )}
             {/* Overlay prompt when no data */}
             {!riskData && !isLoading && (
               <div className="globe-overlay">
@@ -250,8 +278,8 @@ function App() {
           <SourceGroups groups={sourceGroups} />
           {selectedObject && (
             <ObjectDetailModal
-              object={selectedObject}
-              onClose={() => { setSelectedObject(null); setTrajectoryPoints([]); }}
+              object={allRisks.find(r => String(r.noradId) === String(selectedObject.noradId)) || selectedObject}
+              onClose={() => { setSelectedObject(null); setTrajectoryPoints([]); setTrajectoryError(null); }}
             />
           )}
         </div>

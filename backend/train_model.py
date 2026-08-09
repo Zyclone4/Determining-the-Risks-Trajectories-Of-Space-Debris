@@ -991,6 +991,13 @@ def create_app():
                 "objectType": "Debris" if int(row.get("debris_status", 1)) == 1 else "Payload",
                 "source": name,
                 "catalog": name if name != "UNKNOWN" else "Unknown",
+                "position": {
+                    "geodetic": {
+                        "latitude": round(_eci_to_geodetic(float(row["X"]), float(row["Y"]), float(row["Z"]))[0], 4) if not pd.isna(row["X"]) else 0.0,
+                        "longitude": round(_eci_to_geodetic(float(row["X"]), float(row["Y"]), float(row["Z"]))[1], 4) if not pd.isna(row["X"]) else 0.0,
+                        "altitude": round(_eci_to_geodetic(float(row["X"]), float(row["Y"]), float(row["Z"]))[2], 2) if not pd.isna(row["X"]) else 0.0,
+                    }
+                },
             })
 
         scored.sort(key=lambda x: x["riskScore"], reverse=True)
@@ -1022,8 +1029,10 @@ def create_app():
             "total": len(obj)
         }
     @app.get("/api/propagate/{norad_id}")
-    async def propagate(norad_id: int, duration: int = 2880, interval: int = 5):
-        df = pd.read_parquet(PARQUET_INPUT)
+    async def propagate(norad_id: int, duration: int = 2880, interval: int = 5, useLive: bool = False):
+        live_path = CACHE_DIR / "propagated_features_live.parquet"
+        source_path = live_path if (useLive and live_path.exists()) else PARQUET_INPUT
+        df = pd.read_parquet(source_path)
         df["NORAD_CAT_ID"] = df["NORAD_CAT_ID"].astype(str)
         obj = df[df["NORAD_CAT_ID"] == str(norad_id)].sort_values("step")
         if len(obj) == 0:

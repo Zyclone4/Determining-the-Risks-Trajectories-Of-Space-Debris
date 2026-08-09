@@ -24,6 +24,7 @@ export async function fetchTrajectory(noradId, opts = {}) {
   const params = {};
   if (opts.interval) params.interval = opts.interval;
   if (opts.duration) params.duration = opts.duration;
+  if (opts.useLive) params.useLive = true;
   return (await api.get(`/propagate/${noradId}`, { params })).data;
 }
 
@@ -35,6 +36,10 @@ export async function fetchRisks(opts = {}) {
   return (await api.get("/risks", { params })).data;
 }
 
+/** Re-propagate and score from a custom start time (no retraining) */
+export async function fetchAnalyze(startTime) {
+  return (await api.post("/analyze", { startTime: startTime.toISOString() })).data;
+}
 /** Health check */
 export async function checkHealth() {
   return (await api.get("/health")).data;

@@ -51,7 +51,7 @@ export default function Header({ backendOnline, lastUpdate, onAnalyze, isLoading
               onClick={() => onAnalyze?.(new Date(startTime))}
               disabled={isLoading}
             >
-              {isLoading ? <><span className="spinner" style={{ width: 14, height: 14 }} /> Analyzing…</> : "🛰️ Analyze Orbits"}
+              {isLoading ? <><span className="spinner" style={{ width: 14, height: 14 }} /> Analyzing… (~30s)</> : "🛰️ Analyze Orbits"}
             </button>
           </div>
         </div>
