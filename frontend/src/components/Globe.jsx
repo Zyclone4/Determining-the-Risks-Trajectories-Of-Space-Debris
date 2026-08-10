@@ -58,13 +58,20 @@ function geoToCartesian(lat, lon, alt) {
   return [-r * Math.sin(phi) * Math.cos(theta), r * Math.cos(phi), r * Math.sin(phi) * Math.sin(theta)];
 }
 
+function ControlsUpdater({ controlsRef }) {
+  useFrame(() => {
+    if (controlsRef.current) controlsRef.current.update();
+  });
+  return null;
+}
 function ScreenPosition({ position, onPosition }) {
-  const { camera, size } = useThree();
-  useEffect(() => {
+  const { camera, size, gl } = useThree();
+  useFrame(() => {
     const vec = new THREE.Vector3(...position);
     vec.project(camera);
-    const x = (vec.x * 0.5 + 0.5) * size.width;
-    const y = (-(vec.y * 0.5) + 0.5) * size.height;
+    const canvasRect = gl.domElement.getBoundingClientRect();
+    const x = (vec.x * 0.5 + 0.5) * size.width + canvasRect.left;
+    const y = (-(vec.y * 0.5) + 0.5) * size.height + canvasRect.top;
     onPosition({ x, y });
   });
   return null;
@@ -218,6 +225,7 @@ export default function Globe({
   onSelectObject,
   showGrid = false,
 }){
+  const controlsRef = useRef(null);
   const [step, setStep] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [hoveredId, setHoveredId] = useState(null);
@@ -256,8 +264,6 @@ export default function Globe({
             selectedId={selectedObjectId} 
             onSelect={(id) => { 
               onSelectObject(id); 
-              // Lock selectedPos to the current hover position so there is 0 shift
-              setSelectedPos(tooltipPos); 
             }}
             trajectoryPoints={trajectoryPoints} 
             playbackStep={step}
@@ -280,7 +286,12 @@ export default function Globe({
           {selectedObjectId && objects?.length > 0 && (() => {
             const sel = objects.find(o => String(o.noradId) === String(selectedObjectId));
             if (!sel?.position?.geodetic) return null;
-            const { latitude, longitude, altitude } = sel.position.geodetic;
+            let latitude, longitude, altitude;
+            if (trajectoryPoints?.length > 0 && trajectoryPoints[step]?.geodetic) {
+              ({ latitude, longitude, altitude } = trajectoryPoints[step].geodetic);
+            } else {
+              ({ latitude, longitude, altitude } = sel.position.geodetic);
+            }
             const pos = geoToCartesian(latitude, longitude, altitude);
             return <ScreenPosition position={pos} onPosition={setLabelScreenPos} />;
           })()}
@@ -292,7 +303,8 @@ export default function Globe({
               color={RISK_LINE_COLORS[selectedObjectRisk] || "#06b6d4"}
             />
           )}
-          <OrbitControls enablePan={false} minDistance={1.5} maxDistance={8} enableDamping dampingFactor={0.05} rotateSpeed={0.5} makeDefault onClick={e => e.stopPropagation()} />
+          <OrbitControls ref={controlsRef} enablePan={false} minDistance={1.5} maxDistance={8} enableDamping dampingFactor={0.05} rotateSpeed={0.5} makeDefault onClick={e => e.stopPropagation()} />
+          <ControlsUpdater controlsRef={controlsRef} />
         </Canvas>
       </div>
       {/* HTML tooltip overlay */}
@@ -319,11 +331,11 @@ export default function Globe({
       )}
 
       {/* Selected object persistent label */}
-      {selectedObjectId && (
+      {selectedObjectId && labelScreenPos && (
         <div style={{
           position: "fixed",
-          left: selectedPos.x,
-          top: selectedPos.y,
+          left: labelScreenPos.x,
+          top: labelScreenPos.y,
           background: "rgba(13,17,23,0.92)",
           border: `1px solid ${RISK_LINE_COLORS[selectedObjectRisk] || "#388bfd"}`,
           borderRadius: 4,
