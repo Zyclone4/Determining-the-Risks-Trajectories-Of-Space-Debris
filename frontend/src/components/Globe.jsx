@@ -21,7 +21,6 @@ const RISK_COLORS = {
   watch: new THREE.Color("#d29922"),
   safe: new THREE.Color("#3fb950"),
   active: new THREE.Color("#38bdf8"),
-  unknown: new THREE.Color("#a78bfa"),
 };
 
 function riskLevel(score) {
@@ -359,7 +358,6 @@ export default function Globe({
         <span className="globe-legend__item"><span className="globe-legend__dot" style={{ background: "#d29922" }} />Watch 0.45–0.70</span>
         <span className="globe-legend__item"><span className="globe-legend__dot" style={{ background: "#3fb950" }} />Safe &lt; 0.45</span>
         <span className="globe-legend__item"><span className="globe-legend__dot" style={{ background: "#38bdf8" }} />Active</span>
-        <span className="globe-legend__item"><span className="globe-legend__dot" style={{ background: "#a78bfa" }} />Unknown</span>
       </div>
 
       {/* Playback Slider */}
