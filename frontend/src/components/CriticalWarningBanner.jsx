@@ -7,6 +7,13 @@ function formatCountdown(seconds) {
   const s = seconds % 60;
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
+function formatDurationShort(seconds) {
+  if (seconds <= 0) return "0m";
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+}
 
 function DismissDropdown({ onDismissOne, onDismissAll }) {
   const [open, setOpen] = useState(false);
@@ -119,7 +126,7 @@ export default function CriticalWarningBanner({
               <span className="crit-banner__countdown mono">{formatCountdown(countdown)}</span>
             </div>
             <div className="crit-banner__message">
-              {message || `Conjunction predicted with ${closestApproachObject || "unknown object"}${closestApproachObjectId ? ` (NORAD ${closestApproachObjectId})` : ""} — risk score ${safeRiskScore.toFixed(2)}. Closest approach in ${Math.ceil(countdown / 60)} min. Immediate maneuver window open.`}
+              {message || `Conjunction predicted with ${closestApproachObject || "unknown object"}${closestApproachObjectId ? ` (NORAD ${closestApproachObjectId})` : ""} in ${formatDurationShort(countdown)} — Risk score ${safeRiskScore.toFixed(2)}`}
             </div>
             <div className="crit-banner__meta">
               {approachAlt != null && <span><em>Approach Alt</em> {approachAlt} km</span>}
