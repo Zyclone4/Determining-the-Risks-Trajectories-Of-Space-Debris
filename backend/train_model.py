@@ -1069,6 +1069,7 @@ def create_app():
             })
         tle_path = CACHE_DIR / "tle_raw.json"
         orbital_period_min = None
+        orbital_elements = None
         if tle_path.exists():
             tle_records = json.loads(tle_path.read_text())
             tle_match = next((r for r in tle_records if str(r.get("NORAD_CAT_ID")) == str(norad_id)), None)
@@ -1076,10 +1077,19 @@ def create_app():
                 mean_motion = float(tle_match.get("MEAN_MOTION", 0) or 0)
                 if mean_motion > 0:
                     orbital_period_min = 1440.0 / mean_motion
+                orbital_elements = {
+                    "semiMajorAxisKm": float(tle_match.get("SEMIMAJOR_AXIS", 0) or 0),
+                    "eccentricity": float(tle_match.get("ECCENTRICITY", 0) or 0),
+                    "inclinationDeg": float(tle_match.get("INCLINATION", 0) or 0),
+                    "raanDeg": float(tle_match.get("RA_OF_ASC_NODE", 0) or 0),
+                    "argPerigeeDeg": float(tle_match.get("ARG_OF_PERICENTER", 0) or 0),
+                    "epoch": tle_match.get("EPOCH"),
+                }
         return {
             "noradId": norad_id,
             "totalPoints": len(points),
             "orbitalPeriodMinutes": orbital_period_min,
+            "orbitalElements": orbital_elements,
             "trajectoryPoints": points,
         }
 

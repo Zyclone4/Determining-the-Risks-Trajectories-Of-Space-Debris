@@ -57,6 +57,60 @@ function geoToCartesian(lat, lon, alt) {
   return [-r * Math.sin(phi) * Math.cos(theta), r * Math.cos(phi), r * Math.sin(phi) * Math.sin(theta)];
 }
 
+function keplerianEllipsePoints(firstPoint, segments = 128) {
+  if (!firstPoint || firstPoint.x == null || firstPoint.vx == null) return null;
+  const MU = 398600.4418;
+
+  const rVec = [firstPoint.x, firstPoint.y, firstPoint.z];
+  const vVec = [firstPoint.vx, firstPoint.vy, firstPoint.vz];
+  const rMag = Math.hypot(rVec[0], rVec[1], rVec[2]);
+  const vMag = Math.hypot(vVec[0], vVec[1], vVec[2]);
+  if (rMag === 0) return null;
+
+  const hVec = [
+    rVec[1] * vVec[2] - rVec[2] * vVec[1],
+    rVec[2] * vVec[0] - rVec[0] * vVec[2],
+    rVec[0] * vVec[1] - rVec[1] * vVec[0],
+  ];
+  const hMag = Math.hypot(hVec[0], hVec[1], hVec[2]);
+  if (hMag === 0) return null;
+
+  const rDotV = rVec[0] * vVec[0] + rVec[1] * vVec[1] + rVec[2] * vVec[2];
+  const eVec = [
+    ((vMag * vMag - MU / rMag) * rVec[0] - rDotV * vVec[0]) / MU,
+    ((vMag * vMag - MU / rMag) * rVec[1] - rDotV * vVec[1]) / MU,
+    ((vMag * vMag - MU / rMag) * rVec[2] - rDotV * vVec[2]) / MU,
+  ];
+  const eMag = Math.hypot(eVec[0], eVec[1], eVec[2]);
+  if (eMag === 0) return null;
+  const eHat = eVec.map(function(v) { return v / eMag; });
+  const hHat = hVec.map(function(v) { return v / hMag; });
+  const pHat = [
+    hHat[1] * eHat[2] - hHat[2] * eHat[1],
+    hHat[2] * eHat[0] - hHat[0] * eHat[2],
+    hHat[0] * eHat[1] - hHat[1] * eHat[0],
+  ];
+
+  const aKm = 1.0 / (2.0 / rMag - (vMag * vMag) / MU);
+  if (!isFinite(aKm) || aKm <= 0) return null;
+
+  const points = [];
+  for (let s = 0; s <= segments; s++) {
+    const nu = (s / segments) * 2 * Math.PI;
+    const r = (aKm * (1 - eMag * eMag)) / (1 + eMag * Math.cos(nu));
+    const cosNu = Math.cos(nu), sinNu = Math.sin(nu);
+    const eciX = r * (cosNu * eHat[0] + sinNu * pHat[0]);
+    const eciY = r * (cosNu * eHat[1] + sinNu * pHat[1]);
+    const eciZ = r * (cosNu * eHat[2] + sinNu * pHat[2]);
+    points.push(new THREE.Vector3(
+      eciX * SCALE_FACTOR,
+      eciZ * SCALE_FACTOR,
+      -eciY * SCALE_FACTOR
+    ));
+  }
+  return points;
+}
+
 function ControlsUpdater({ controlsRef }) {
   useFrame(() => {
     if (controlsRef.current) controlsRef.current.update();
@@ -139,6 +193,8 @@ function DebrisPoints({ objects, onSelect, selectedId, trajectoryPoints, playbac
 
 function TrajectoryLine({ points, color = "#06b6d4", orbitalPeriodMinutes = null }) {
   const linePoints = useMemo(() => {
+    const ellipsePoints = keplerianEllipsePoints(points?.[0]);
+    if (ellipsePoints) return ellipsePoints;
     if (!Array.isArray(points) || points.length < 2) return [];
 
     const vectors = [];

@@ -42,6 +42,7 @@ function App() {
   const [globeSelectedId, setGlobeSelectedId] = useState(null);
   const [trajectoryPoints, setTrajectoryPoints] = useState([]);
   const [orbitalPeriodMinutes, setOrbitalPeriodMinutes] = useState(null);
+  const [orbitalElements, setOrbitalElements] = useState(null);
   const [dismissedBanner, setDismissedBanner] = useState(false);
   const [dismissedObjects, setDismissedObjects] = useState(new Set());
   
@@ -103,6 +104,7 @@ function App() {
       const traj = await fetchTrajectory(noradId, { duration: 2880, interval: 5, useLive: isCustomTimeframe });
       setTrajectoryPoints(traj.trajectoryPoints || []);
       setOrbitalPeriodMinutes(traj.orbitalPeriodMinutes || null);
+      setOrbitalElements(traj.orbitalElements || null);
       setTrajectoryError(traj.error || (!traj.trajectoryPoints?.length ? "No propagation data available for this object at this time." : null));
     } catch {
       setTrajectoryPoints([]);
@@ -118,6 +120,7 @@ function App() {
       const traj = await fetchTrajectory(noradId, { duration: 2880, interval: 5, useLive: isCustomTimeframe });
       setTrajectoryPoints(traj.trajectoryPoints || []);
       setOrbitalPeriodMinutes(traj.orbitalPeriodMinutes || null);
+      setOrbitalElements(traj.orbitalElements || null);
       setTrajectoryError(traj.error || (!traj.trajectoryPoints?.length ? "No propagation data available for this object at this time." : null));
     } catch {
       setTrajectoryPoints([]);
@@ -261,6 +264,7 @@ function App() {
               objects={globeObjects}
               trajectoryPoints={trajectoryPoints}
               orbitalPeriodMinutes={orbitalPeriodMinutes}
+              orbitalElements={orbitalElements}
               selectedObjectId={globeSelectedId}
               selectedObjectName={riskData?.risks?.find(r => String(r.noradId) === String(globeSelectedId))?.name}
               selectedObjectRisk={riskData?.risks?.find(r => String(r.noradId) === String(globeSelectedId))?.riskLabel}
