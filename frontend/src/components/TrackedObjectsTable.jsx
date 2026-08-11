@@ -14,6 +14,7 @@ export default function TrackedObjectsTable({ risks = [], onSelectObject, select
   const [riskFilter, setRiskFilter] = useState("all");
   const [altFilter, setAltFilter] = useState("all");
   const [catFilter, setCatFilter] = useState("all");
+  const [typeFilter, setTypeFilter] = useState("all");
   const [sortCol, setSortCol] = useState("riskScore");
   const [sortDir, setSortDir] = useState("desc");
 
@@ -50,6 +51,11 @@ export default function TrackedObjectsTable({ risks = [], onSelectObject, select
     if (catFilter !== "all") {
       items = items.filter(r => (r.catalog || "").toLowerCase().includes(catFilter));
     }
+    if (typeFilter !== "all") {
+      items = items.filter(r =>
+        typeFilter === "active" ? r.objectType === "Payload" : r.objectType !== "Payload"
+      );
+    }
     items = [...items].sort((a, b) => {
       if (sortCol === "noradId" || sortCol === "name") {
         const as = String(a[sortCol] ?? "");
@@ -61,16 +67,21 @@ export default function TrackedObjectsTable({ risks = [], onSelectObject, select
       return sortDir === "asc" ? av - bv : bv - av;
     });
     return items;
-  }, [risks, search, riskFilter, altFilter, catFilter, sortCol, sortDir]);
+  }, [risks, search, riskFilter, altFilter, catFilter, typeFilter, sortCol, sortDir]);
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const clampedPage = Math.min(page, totalPages - 1);
   const pageItems = filtered.slice(clampedPage * PAGE_SIZE, (clampedPage + 1) * PAGE_SIZE);
 
   const categories = useMemo(() => {
     const cats = new Set();
-    risks.forEach(r => { if (r.catalog) cats.add(r.catalog); });
+    risks.forEach(r => {
+      if (!r.catalog) return;
+      if (typeFilter === "active" && r.objectType !== "Payload") return;
+      if (typeFilter === "debris" && r.objectType === "Payload") return;
+      cats.add(r.catalog);
+    });
     return Array.from(cats);
-  }, [risks]);
+  }, [risks, typeFilter]);
 
   return (
     <div className="tracked-table fade-in">
@@ -89,6 +100,11 @@ export default function TrackedObjectsTable({ risks = [], onSelectObject, select
             <option value="watch">Watch</option>
             <option value="safe">Safe</option>
           </select>
+          <select className="input tracked-table__select" value={typeFilter} onChange={e => { setTypeFilter(e.target.value); setCatFilter("all"); setPage(0); }}>
+            <option value="all">Debris / Satellite</option>
+            <option value="debris">Debris</option>
+            <option value="active">Active Satellite</option>
+          </select>
           <select className="input tracked-table__select" value={altFilter} onChange={e => { setAltFilter(e.target.value); setPage(0); }}>
             <option value="all">Altitudes</option>
             <option value="leo">LEO (160–2,000 km)</option>
@@ -97,7 +113,7 @@ export default function TrackedObjectsTable({ risks = [], onSelectObject, select
             <option value="heo">HEO (Eccentricity &gt; 0.25)</option>
           </select>
           <select className="input tracked-table__select" value={catFilter} onChange={e => { setCatFilter(e.target.value); setPage(0); }}>
-            <option value="all">Category</option>
+            <option value="all">Source</option>
             {categories.map(c => <option key={c} value={c.toLowerCase()}>{c}</option>)}
           </select>
         </div>
