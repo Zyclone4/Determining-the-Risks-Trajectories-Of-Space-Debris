@@ -28,6 +28,13 @@ export async function fetchTrajectory(noradId, opts = {}) {
   return (await api.get(`/propagate/${noradId}`, { params })).data;
 }
 
+/** Fetch first-step position/velocity for many objects at once (for drawing multiple orbit ellipses) */
+export async function fetchTrajectoryBatch(noradIds, opts = {}) {
+  const params = { ids: noradIds.join(",") };
+  if (opts.useLive) params.useLive = true;
+  return (await api.get("/propagate-batch", { params })).data;
+}
+
 /** Fetch risk-scored objects */
 export async function fetchRisks(opts = {}) {
   const params = {};

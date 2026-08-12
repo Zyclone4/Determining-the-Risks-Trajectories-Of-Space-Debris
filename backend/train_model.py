@@ -1083,6 +1083,33 @@ def create_app():
             "trajectoryPoints": points,
         }
 
+    @app.get("/api/propagate-batch")
+    async def propagate_batch(ids: str, useLive: bool = False):
+        """Returns just the first trajectory point (position+velocity) for
+        each requested NORAD ID -- enough to derive an orbital ellipse,
+        without the cost of fetching full 577-step trajectories per object."""
+        norad_ids = [s.strip() for s in ids.split(",") if s.strip()]
+        live_path = CACHE_DIR / "propagated_features_live.parquet"
+        source_path = live_path if (useLive and live_path.exists()) else PARQUET_INPUT
+        df = pd.read_parquet(source_path)
+        df["NORAD_CAT_ID"] = df["NORAD_CAT_ID"].astype(str)
+        df = df[df["NORAD_CAT_ID"].isin(norad_ids)]
+        first_rows = df.sort_values("step").groupby("NORAD_CAT_ID").first().reset_index()
+
+        results = {}
+        for _, row in first_rows.iterrows():
+            if pd.isna(row["X"]) or pd.isna(row["VX"]):
+                continue
+            results[row["NORAD_CAT_ID"]] = {
+                "x": round(float(row["X"]), 4),
+                "y": round(float(row["Y"]), 4),
+                "z": round(float(row["Z"]), 4),
+                "vx": round(float(row["VX"]), 4),
+                "vy": round(float(row["VY"]), 4),
+                "vz": round(float(row["VZ"]), 4),
+            }
+        return {"points": results}
+
     return app
 # ═══════════════════════════════════════════════════════════════════════════════
 # CLI

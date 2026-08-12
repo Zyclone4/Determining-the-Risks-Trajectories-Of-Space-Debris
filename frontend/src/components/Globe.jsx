@@ -111,6 +111,23 @@ function keplerianEllipsePoints(firstPoint, segments = 128) {
   return points;
 }
 
+function EllipseOnly({ point, color = "#6b7280", lineWidth = 0.8 }) {
+  const linePoints = useMemo(() => keplerianEllipsePoints(point), [point]);
+  if (!linePoints || linePoints.length < 2) return null;
+  return (
+    <Line
+      points={linePoints}
+      color={color}
+      lineWidth={lineWidth}
+      worldUnits={false}
+      depthTest={true}
+      depthWrite={false}
+      transparent
+      opacity={0.35}
+    />
+  );
+}
+
 function ControlsUpdater({ controlsRef }) {
   useFrame(() => {
     if (controlsRef.current) controlsRef.current.update();
@@ -274,6 +291,7 @@ export default function Globe({
   objects = [],
   trajectoryPoints = [],
   orbitalPeriodMinutes = null,
+  ellipsePoints = {},
   selectedObjectId,
   selectedObjectName,
   selectedObjectRisk,
@@ -350,6 +368,9 @@ export default function Globe({
             const pos = geoToCartesian(latitude, longitude, altitude);
             return <ScreenPosition position={pos} onPosition={setLabelScreenPos} />;
           })()}
+          {Object.entries(ellipsePoints).map(([id, pt]) => (
+            <EllipseOnly key={id} point={pt} />
+          ))}
           {selectedObjectId && trajectoryPoints.length > 0 && (
             <TrajectoryLine
               points={trajectoryPoints}

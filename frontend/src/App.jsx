@@ -15,7 +15,7 @@ import RFDiagnosticsPanel from "./components/RFDiagnosticsPanel";
 import TrackedObjectsTable from "./components/TrackedObjectsTable";
 import ObjectDetailModal from "./components/ObjectDetailModal";
 import CriticalWarningBanner from "./components/CriticalWarningBanner";
-import { fetchDebrisData, fetchRisks, fetchTrajectory, checkHealth, fetchModelDiagnostics, fetchAnalyze } from "./api/client";
+import { fetchDebrisData, fetchRisks, fetchTrajectory, checkHealth, fetchModelDiagnostics, fetchAnalyze, fetchTrajectoryBatch } from "./api/client";
 import "./App.css";
 
 // Default toggles
@@ -42,6 +42,7 @@ function App() {
   const [globeSelectedId, setGlobeSelectedId] = useState(null);
   const [trajectoryPoints, setTrajectoryPoints] = useState([]);
   const [orbitalPeriodMinutes, setOrbitalPeriodMinutes] = useState(null);
+  const [ellipsePoints, setEllipsePoints] = useState({});
   const [dismissedBanner, setDismissedBanner] = useState(false);
   const [dismissedObjects, setDismissedObjects] = useState(new Set());
   
@@ -170,6 +171,31 @@ function App() {
     return [...finalDebris, ...activeItems];
   }, [allRisks, toggles.top50, toggles.activeSats, toggles.debris, toggles.src_cosmos2251, toggles.src_iridium33, toggles.conjunctions]);
 
+  // IDs to draw orbit ellipses for when "Orbit Ellipses" toggle is on:
+  // always Top 50 highest-risk debris, further narrowed to Critical/Watch
+  // if that filter is also active -- independent of the main Top50 toggle.
+  const ellipseObjectIds = useMemo(() => {
+    if (!toggles.ellipses) return [];
+    const debrisOnly = allRisks.filter(r => r.objectType !== "Payload");
+    let items = [...debrisOnly].sort((a, b) => (b.riskScore ?? 0) - (a.riskScore ?? 0)).slice(0, 50);
+    if (toggles.conjunctions) {
+      items = items.filter(r => r.riskLabel === "Critical" || r.riskLabel === "Watch");
+    }
+    return items.map(r => r.noradId);
+  }, [allRisks, toggles.ellipses, toggles.conjunctions]);
+
+  useEffect(() => {
+    if (ellipseObjectIds.length === 0) {
+      setEllipsePoints({});
+      return;
+    }
+    let cancelled = false;
+    fetchTrajectoryBatch(ellipseObjectIds, { useLive: isCustomTimeframe })
+      .then(res => { if (!cancelled) setEllipsePoints(res.points || {}); })
+      .catch(() => { if (!cancelled) setEllipsePoints({}); });
+    return () => { cancelled = true; };
+  }, [ellipseObjectIds, isCustomTimeframe]);
+
   // Critical object for banner
   const criticalObjects = useMemo(() => {
     if (!allRisks.length) return [];
@@ -261,6 +287,7 @@ function App() {
               objects={globeObjects}
               trajectoryPoints={trajectoryPoints}
               orbitalPeriodMinutes={orbitalPeriodMinutes}
+              ellipsePoints={ellipsePoints}
               selectedObjectId={globeSelectedId}
               selectedObjectName={riskData?.risks?.find(r => String(r.noradId) === String(globeSelectedId))?.name}
               selectedObjectRisk={riskData?.risks?.find(r => String(r.noradId) === String(globeSelectedId))?.riskLabel}

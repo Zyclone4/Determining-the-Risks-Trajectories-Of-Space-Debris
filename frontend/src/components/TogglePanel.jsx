@@ -1,7 +1,7 @@
 const TOGGLES = [
   { key: "top50", label: "Show Top 50 Highest-Risk Only", default: true },
   { key: "grid", label: "Earth Coordinate Grid", default: false },
-  { key: "ellipses", label: "Orbit Ellipses", default: false },
+  { key: "ellipses", label: "Orbit Ellipses (Top 50)", default: false },
   { key: "velocity", label: "Velocity Vectors", default: false },
   { key: "activeSats", label: "Active Satellites", default: true },
   { key: "debris", label: "Space Debris", default: true },
