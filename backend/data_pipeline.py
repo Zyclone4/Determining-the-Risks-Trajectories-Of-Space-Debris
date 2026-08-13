@@ -396,6 +396,99 @@ def _build_jd_arrays(t0, horizon_hours, step_minutes):
     return jd_arr, fr_arr, timestamps
 
 
+# ── Refined Closest-Approach (fine-resolution re-propagation) ──────────────────
+REFINE_WINDOW_MINUTES = 10.0
+REFINE_STEP_SECONDS = 1.0
+REFINE_TOP_N = 50  # only refine the N closest-approach objects -- bounded cost
+
+def _build_jd_arrays_fine(t0, window_minutes, step_seconds):
+    n_steps = int((window_minutes * 60) / step_seconds) + 1
+    jd_arr = np.empty(n_steps, dtype=np.float64)
+    fr_arr = np.empty(n_steps, dtype=np.float64)
+    timestamps = []
+    for i in range(n_steps):
+        t = t0 + timedelta(seconds=i * step_seconds)
+        jd_arr[i], fr_arr[i] = jday(
+            t.year, t.month, t.day, t.hour, t.minute,
+            t.second + t.microsecond / 1e6,
+        )
+        timestamps.append(t)
+    return jd_arr, fr_arr, timestamps
+
+
+def _propagate_fine(line1, line2, jd_arr, fr_arr):
+    sat = Satrec.twoline2rv(line1, line2)
+    e, r, v = sat.sgp4_array(jd_arr, fr_arr)
+    r = np.asarray(r, dtype=np.float64)
+    mask = np.asarray(e) != 0
+    r[mask] = np.nan
+    return r
+
+
+def refine_closest_approach(tle_line1_a, tle_line2_a, tle_line1_b, tle_line2_b,
+                             coarse_min_time,
+                             window_minutes=REFINE_WINDOW_MINUTES,
+                             step_seconds=REFINE_STEP_SECONDS):
+    window_start = coarse_min_time - timedelta(minutes=window_minutes / 2)
+    jd_arr, fr_arr, timestamps = _build_jd_arrays_fine(window_start, window_minutes, step_seconds)
+
+    r_a = _propagate_fine(tle_line1_a, tle_line2_a, jd_arr, fr_arr)
+    r_b = _propagate_fine(tle_line1_b, tle_line2_b, jd_arr, fr_arr)
+
+    dist = np.linalg.norm(r_a - r_b, axis=1)
+    valid = ~np.isnan(dist)
+    if not valid.any():
+        return None
+
+    min_idx = np.nanargmin(dist)
+    return {
+        "refined_min_distance_km": float(dist[min_idx]),
+        "refined_time": timestamps[min_idx],
+    }
+
+
+def refine_top_closest_approaches(records, norad_ids, nearest_approach,
+                                   nearest_approach_step, nearest_approach_partner,
+                                   timestamps, top_n=REFINE_TOP_N):
+    tle_by_id = {str(r["NORAD_CAT_ID"]): r for r in records if r.get("TLE_LINE1")}
+
+    valid_mask = ~np.isnan(nearest_approach) & (nearest_approach_step >= 0) & (nearest_approach_partner >= 0)
+    valid_idx = np.where(valid_mask)[0]
+    if len(valid_idx) == 0:
+        logger.info("No valid objects to refine closest-approach for")
+        return {}
+
+    ranked = valid_idx[np.argsort(nearest_approach[valid_idx])][:top_n]
+
+    logger.info("Refining closest approach for top %d objects via fine-resolution re-propagation...", len(ranked))
+    refined = {}
+    for idx in ranked:
+        norad_a = str(norad_ids[idx])
+        partner_idx = int(nearest_approach_partner[idx])
+        norad_b = str(norad_ids[partner_idx])
+        step = int(nearest_approach_step[idx])
+
+        tle_a = tle_by_id.get(norad_a)
+        tle_b = tle_by_id.get(norad_b)
+        if not tle_a or not tle_b:
+            continue
+        if step >= len(timestamps):
+            continue
+
+        coarse_time = timestamps[step]
+        result = refine_closest_approach(
+            tle_a["TLE_LINE1"], tle_a["TLE_LINE2"],
+            tle_b["TLE_LINE1"], tle_b["TLE_LINE2"],
+            coarse_time,
+        )
+        if result is not None:
+            refined[norad_a] = result["refined_min_distance_km"]
+
+    logger.info("Refined closest approach for %d/%d objects successfully", len(refined), len(ranked))
+    return refined
+
+
+
 def propagate_all(records, t0=None, horizon_hours=HORIZON_HOURS,
                   step_minutes=STEP_MINUTES, n_workers=None):
     if t0 is None:
@@ -624,6 +717,18 @@ def build_and_save_dataset(
         norad_ids_arr[idx] if idx >= 0 else None
         for idx in nearest_approach_partner_idx
     ], dtype=object)
+
+    # Refine closest approach for the highest-risk objects via fine-resolution
+    # re-propagation, rather than trusting the coarse 5-minute sample alone.
+    refined_map = refine_top_closest_approaches(
+        records, norad_ids, nearest_approach, nearest_approach_step,
+        nearest_approach_partner_idx, timestamps,
+    )
+    refined_nearest_approach = nearest_approach.copy()
+    for idx, nid in enumerate(norad_ids):
+        rk = refined_map.get(str(nid))
+        if rk is not None:
+            refined_nearest_approach[idx] = rk
     min_altitude = feat["min_altitude"]
     shell_density = feat["shell_density"]
     debris_status = feat["debris_status"]
@@ -667,6 +772,7 @@ def build_and_save_dataset(
         "VZ": vel_flat[:, 2],
         "altitude": alt_flat,
         "nearest_approach": np.repeat(nearest_approach, n_steps),
+        "refined_nearest_approach": np.repeat(refined_nearest_approach, n_steps),
         "nearest_approach_step": np.repeat(nearest_approach_step, n_steps),
         "nearest_approach_partner": np.repeat(nearest_approach_partner_id, n_steps),
         "min_altitude": np.repeat(min_altitude, n_steps),
