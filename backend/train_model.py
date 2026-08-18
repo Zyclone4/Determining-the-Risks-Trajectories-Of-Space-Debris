@@ -4,7 +4,7 @@ train_model.py — GRU / RandomForest training pipeline + FastAPI diagnostics
 
 Pipeline:
   Step 1: Train GRU (PyTorch GRU + Linear, FastAI Learner, MSE, MAE)
-           → compliance check (MSE ≤ 0.05 OR MAE ≤ 0.05)
+           → compliance check (MSE ≤ 0.05 AND MAE ≤ 0.05)
   Step 2: If GRU fails → construct Critical / Watch / Safe labels
   Step 3: Train RandomForest classifier as fallback
   Step 4: Save winning model + model_meta.json + diagnostics.json
@@ -85,9 +85,7 @@ RANDOM_SEED = 42
 
 # ── GRU Hyper-parameters ──────────────────────────────────────────────────────
 
-GRU_FEATURES = ["delta_x_tca", "delta_y_tca", "delta_z_tca",
-                 "delta_vx_tca", "delta_vy_tca", "delta_vz_tca",
-                 "nearest_approach", "altitude"]
+GRU_FEATURES = ["delta_vx_tca", "delta_vy_tca", "delta_vz_tca", "altitude"]
 GRU_INPUT_SIZE = len(GRU_FEATURES)
 GRU_HIDDEN = 64
 GRU_LAYERS = 2
@@ -231,7 +229,7 @@ def prepare_dataset(parquet_path=None, seed=RANDOM_SEED):
     df = load_dataset(parquet_path)
 
     logger.info("Generating synthetic ground-truth risk scores...")
-    df["risk_score"] = generate_risk_score(df, seed=seed)
+    df["risk_score"] = df["physics_risk_score"]  # real physics-based label; generate_risk_score() (synthetic, derived from delta_x/y/z_tca) is now unused to avoid circularity with GRU_FEATURES
 
     logger.info("Splitting by NORAD_CAT_ID (%.0f / %.0f / %.0f)...",
                 TRAIN_RATIO * 100, VAL_RATIO * 100, TEST_RATIO * 100)
@@ -391,7 +389,7 @@ def train_gru(train_df, val_df, test_df):
     test_mae = F.l1_loss(preds, targs).item()
     mse_passed = test_mse <= GRU_MSE_THR
     mae_passed = test_mae <= GRU_MAE_THR
-    passed = mse_passed or mae_passed
+    passed = mse_passed and mae_passed  # tightened for paper: both metrics must pass, not either
     logger.info(
         "GRU test  MSE=%.6f (%s ≤ %.2f)  MAE=%.6f (%s ≤ %.2f)  → %s",
         test_mse, "PASS" if mse_passed else "FAIL", GRU_MSE_THR,
@@ -475,9 +473,9 @@ def extract_rf_features(df):
 
 def construct_labels(feat_df):
     def _label(row):
-        if row["perigee_alt_km"] < 400:
+        if row["refined_nearest_approach"] < 20:
             return "Critical"
-        if row["perigee_alt_km"] < 650:
+        if row["refined_nearest_approach"] < 50:
             return "Watch"
         return "Safe"
 
@@ -748,6 +746,10 @@ def run_training_pipeline(parquet_path=None, seed=RANDOM_SEED):
         # computed relative to the full pipeline catalog)
         full_df = pd.concat([train_df, val_df, test_df])
         full_feats = extract_rf_features(full_df)
+        full_feats = full_feats.merge(
+            full_df.groupby("NORAD_CAT_ID")["refined_nearest_approach"].first().reset_index(),
+            on="NORAD_CAT_ID", how="left",
+        )
         full_feats = construct_labels(full_feats)
 
         # Re-split features using the same NORAD ID partition
