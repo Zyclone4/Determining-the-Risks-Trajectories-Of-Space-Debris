@@ -102,6 +102,7 @@ GRU_MAE_THR = 0.05
 RF_FEATURES = [
     "perigee_alt_km", "apogee_alt_km", "inclination_deg",
     "rel_velocity_km_s", "shell_density", "eccentricity",
+    "pairwise_rel_velocity_km_s",
 ]
 RF_PRECISION_THR = 0.85
 RF_RECALL_THR = 0.80
@@ -457,6 +458,11 @@ def extract_rf_features(df):
         # Shell density (per-object constant from pipeline)
         sd = int(obj["shell_density"].iloc[0])
 
+        # Pairwise relative velocity to nearest-approach partner (proximity-adjacent,
+        # but independent of distance -- safe to use, unlike nearest_active which
+        # correlates ~0.62 with the label basis and was excluded for that reason)
+        pairwise_rel_vel = float(obj["relative_velocity_km_s"].iloc[0]) if "relative_velocity_km_s" in obj.columns else 0.0
+
         records.append({
             "NORAD_CAT_ID": nid,
             "perigee_alt_km": perigee,
@@ -465,6 +471,7 @@ def extract_rf_features(df):
             "rel_velocity_km_s": rel_velocity,
             "shell_density": sd,
             "eccentricity": ecc,
+            "pairwise_rel_velocity_km_s": pairwise_rel_vel,
         })
 
     logger.info("Extracted RF features for %d objects", len(records))
