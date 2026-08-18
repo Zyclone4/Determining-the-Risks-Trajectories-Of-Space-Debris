@@ -49,11 +49,13 @@ export default function RFDiagnosticsPanel({ rf, split, accepted, acceptanceReas
   const maxImp = Math.max(...importance, 0.01);
   const oobCurve = rf.oob_curve || [0.35, 0.28, 0.22, 0.18, 0.15, 0.13, 0.12, 0.11, 0.105, 0.10];
   const maxOob = Math.max(...oobCurve, 0.01);
-  const perClass = rf.per_class || [
-    { cls: "Safe", precision: 0.90, recall: 0.88, f1: 0.89 },
-    { cls: "Watch", precision: 0.82, recall: 0.78, f1: 0.80 },
-    { cls: "Critical", precision: 0.88, recall: 0.85, f1: 0.86 },
-  ];
+  const perClass = rf.per_class
+    ? Object.entries(rf.per_class).map(([cls, m]) => ({ cls, ...m }))
+    : [
+        { cls: "Safe", precision: 0.90, recall: 0.88, f1: 0.89 },
+        { cls: "Watch", precision: 0.82, recall: 0.78, f1: 0.80 },
+        { cls: "Critical", precision: 0.88, recall: 0.85, f1: 0.86 },
+      ];
 
   return (
     <div className="diag-panel diag-panel--rf fade-in">

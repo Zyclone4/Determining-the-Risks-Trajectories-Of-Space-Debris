@@ -132,7 +132,7 @@ function App() {
   }, []);
 
   // ── Derived data ──
-  const allRisks = riskData?.risks || [];
+  const allRisks = useMemo(() => riskData?.risks || [], [riskData]);
 
   // Source groups from debris data
   const sourceGroups = useMemo(() => {
