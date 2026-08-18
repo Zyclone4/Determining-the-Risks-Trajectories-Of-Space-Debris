@@ -488,6 +488,79 @@ def refine_top_closest_approaches(records, norad_ids, nearest_approach,
     return refined
 
 
+# ── Physics-Grounded Risk Score (Foster-inspired proxy) ────────────────────────
+# Full Foster (1992) collision probability requires position covariance from
+# tracking data (CDMs), which is not accessible via the public Space-Track GP
+# API used here -- CDM access is restricted to satellite operators. This proxy
+# instead captures Foster's three core physical drivers -- miss distance
+# relative to combined object size, relative velocity, and a TLE-age-based
+# positional uncertainty proxy -- while being explicit that it is not the
+# full covariance-based P_c calculation.
+RCS_SIZE_AREA_M2 = {
+    "SMALL": 0.05,   # midpoint of official "< 0.1 m^2" bucket
+    "MEDIUM": 0.55,  # midpoint of official "0.1-1 m^2" bucket
+    "LARGE": 2.0,    # representative value for the unbounded "> 1 m^2" bucket
+}
+DEFAULT_RCS_AREA_M2 = 0.55  # used when RCS_SIZE is missing (~0.2% of records)
+MAX_RELATIVE_VELOCITY_KM_S = 15.5  # calibrated ceiling: observed max in dataset was 15.41 km/s (p99=14.90), prior value of 15.0 was clipping ~0.5% of objects and saturating the velocity term
+UNCERTAINTY_GROWTH_DAYS = 7.0      # days over which the uncertainty factor grows to its cap
+UNCERTAINTY_FACTOR_CAP = 2.0       # max positional-uncertainty multiplier
+MAX_RISK_DISTANCE_KM = 115.0  # p99 of refined_nearest_approach in dataset (113.2 km); beyond this, distance risk treated as negligible
+REFERENCE_RADIUS_M = 0.8       # sqrt(LARGE_RCS_AREA_M2 / pi); combined radius at/above this saturates the size-sensitivity factor to 1.0
+
+
+def _rcs_radius_m(rcs_size):
+    area = RCS_SIZE_AREA_M2.get(rcs_size, DEFAULT_RCS_AREA_M2)
+    return float(np.sqrt(area / np.pi))
+
+
+def compute_risk_score(record_map, norad_ids, distance_km, partner_idx,
+                        delta_vx, delta_vy, delta_vz, propagation_time):
+    """
+    Computes a distance/velocity/size/uncertainty-based risk score in [0, 1]
+    for each object, using its (refined or coarse) nearest-approach distance
+    and its closest-approach partner's physical size.
+    """
+    n = len(norad_ids)
+    risk = np.zeros(n, dtype=np.float64)
+
+    for i in range(n):
+        if np.isnan(distance_km[i]) or partner_idx[i] < 0:
+            continue
+
+        nid = norad_ids[i]
+        partner_nid = norad_ids[int(partner_idx[i])]
+        rec_self = record_map.get(nid, {})
+        rec_partner = record_map.get(partner_nid, {})
+
+        radius_self = _rcs_radius_m(rec_self.get("RCS_SIZE"))
+        radius_partner = _rcs_radius_m(rec_partner.get("RCS_SIZE"))
+        combined_radius_m = radius_self + radius_partner
+
+        # TLE-age-based uncertainty proxy (not true covariance)
+        epoch_str = rec_self.get("EPOCH")
+        uncertainty_factor = 1.0
+        if epoch_str:
+            try:
+                epoch_dt = datetime.fromisoformat(epoch_str)
+                age_days = (propagation_time - epoch_dt).total_seconds() / 86400.0
+                uncertainty_factor = 1.0 + min(max(age_days, 0) / UNCERTAINTY_GROWTH_DAYS, 1.0) * (UNCERTAINTY_FACTOR_CAP - 1.0)
+            except (ValueError, TypeError):
+                pass
+
+        effective_distance_km = distance_km[i] / uncertainty_factor  # stale TLE -> treat as effectively closer
+        distance_risk = max(0.0, 1.0 - (effective_distance_km / MAX_RISK_DISTANCE_KM))
+        size_factor = min(combined_radius_m / REFERENCE_RADIUS_M, 1.0)
+
+        rel_vel_km_s = float(np.sqrt(delta_vx[i]**2 + delta_vy[i]**2 + delta_vz[i]**2)) if not np.isnan(delta_vx[i]) else 0.0
+        velocity_risk = min(rel_vel_km_s / MAX_RELATIVE_VELOCITY_KM_S, 1.0)
+
+        risk[i] = 0.7 * distance_risk * (0.5 + 0.5 * size_factor) + 0.3 * velocity_risk
+
+    return np.clip(risk, 0.0, 1.0)
+    return refined
+
+
 
 def propagate_all(records, t0=None, horizon_hours=HORIZON_HOURS,
                   step_minutes=STEP_MINUTES, n_workers=None):
@@ -541,11 +614,12 @@ def propagate_all(records, t0=None, horizon_hours=HORIZON_HOURS,
 # Feature Engineering
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _nearest_approach_kdtree(all_pos):
+def _nearest_approach_kdtree(all_pos, all_vel):
     n_obj, n_steps, _ = all_pos.shape
     min_dist = np.full(n_obj, 1e50)
     min_dist_step = np.full(n_obj, -1, dtype=np.int32)
     min_dist_partner = np.full(n_obj, -1, dtype=np.int32)
+    min_dist_delta_vel = np.full((n_obj, 3), np.nan)
     for t in range(n_steps):
         pts = all_pos[:, t, :]
         valid_mask = ~np.any(np.isnan(pts), axis=1)
@@ -561,10 +635,14 @@ def _nearest_approach_kdtree(all_pos):
         improved = nearest < min_dist[valid_idx]
         min_dist[valid_idx] = np.minimum(min_dist[valid_idx], nearest)
         improved_global_idx = valid_idx[improved]
+        improved_partner_idx = nearest_global_idx[improved]
         min_dist_step[improved_global_idx] = t
-        min_dist_partner[improved_global_idx] = nearest_global_idx[improved]
+        min_dist_partner[improved_global_idx] = improved_partner_idx
+        min_dist_delta_vel[improved_global_idx] = (
+            all_vel[improved_global_idx, t, :] - all_vel[improved_partner_idx, t, :]
+        )
     min_dist[min_dist >= 1e50] = np.nan
-    return min_dist, min_dist_step, min_dist_partner
+    return min_dist, min_dist_step, min_dist_partner, min_dist_delta_vel
 def _shell_density(mean_alt, band_km=SHELL_BAND_KM):
     sorted_alt = np.sort(mean_alt[~np.isnan(mean_alt)])
     density = np.zeros(len(mean_alt), dtype=np.int32)
@@ -609,7 +687,7 @@ def compute_features(records, norad_ids, all_pos, all_vel):
                 len(debris_idx), len(active_idx))
 
     logger.info("Computing nearest approach via KD-Tree (%d steps)...", n_steps)
-    nearest_approach_all, nearest_approach_step, nearest_approach_partner = _nearest_approach_kdtree(all_pos)
+    nearest_approach_all, nearest_approach_step, nearest_approach_partner, nearest_approach_delta_vel = _nearest_approach_kdtree(all_pos, all_vel)
 
     # Initialize pairwise TCA features
     n_debris = len(debris_idx)
@@ -668,6 +746,7 @@ def compute_features(records, norad_ids, all_pos, all_vel):
     return {
     "nearest_approach": nearest_approach_all,
     "nearest_approach_step": nearest_approach_step,
+    "nearest_approach_delta_vel": nearest_approach_delta_vel,
     "nearest_approach_partner": nearest_approach_partner,
     "min_miss": min_miss,
     "min_altitude": min_altitude,
@@ -711,6 +790,7 @@ def build_and_save_dataset(
     feat = compute_features(records, norad_ids, all_pos, all_vel)
     nearest_approach = feat["nearest_approach"]
     nearest_approach_step = feat["nearest_approach_step"]
+    nearest_approach_delta_vel = feat["nearest_approach_delta_vel"]
     nearest_approach_partner_idx = feat["nearest_approach_partner"]
     norad_ids_arr = np.array(norad_ids, dtype=object)
     nearest_approach_partner_id = np.array([
@@ -747,6 +827,16 @@ def build_and_save_dataset(
         delta_vel_full[debris_idx] = tca_delta_vel
         min_miss_full[debris_idx] = feat["min_miss"]
 
+    # Physics-grounded risk score (distance/velocity/size/uncertainty proxy)
+    record_map_for_risk = {r["NORAD_CAT_ID"]: r for r in records}
+    propagation_time = t0 if t0 is not None else datetime.now(timezone.utc)
+    risk_score = compute_risk_score(
+        record_map_for_risk, norad_ids, refined_nearest_approach,
+        nearest_approach_partner_idx,
+        nearest_approach_delta_vel[:, 0], nearest_approach_delta_vel[:, 1], nearest_approach_delta_vel[:, 2],
+        propagation_time,
+    )
+
     logger.info("Assembling DataFrame (%d objects × %d steps = %s rows)",
                 n_obj, n_steps, f"{n_obj * n_steps:,}")
 
@@ -760,6 +850,7 @@ def build_and_save_dataset(
     vel_flat = all_vel.reshape(-1, 3)
     alt_flat = altitudes.reshape(-1)
 
+    rel_vel_magnitude = np.linalg.norm(nearest_approach_delta_vel, axis=1)
     df = pd.DataFrame({
         "NORAD_CAT_ID": norad_col,
         "step": step_col,
@@ -773,6 +864,8 @@ def build_and_save_dataset(
         "altitude": alt_flat,
         "nearest_approach": np.repeat(nearest_approach, n_steps),
         "refined_nearest_approach": np.repeat(refined_nearest_approach, n_steps),
+        "physics_risk_score": np.repeat(risk_score, n_steps),
+        "relative_velocity_km_s": np.repeat(rel_vel_magnitude, n_steps),
         "nearest_approach_step": np.repeat(nearest_approach_step, n_steps),
         "nearest_approach_partner": np.repeat(nearest_approach_partner_id, n_steps),
         "min_altitude": np.repeat(min_altitude, n_steps),
