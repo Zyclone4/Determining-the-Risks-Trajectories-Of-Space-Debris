@@ -10,8 +10,8 @@ Dataset: 1233 objects (863 train / 184 val / 186 test)
 
 | Metric | Value | Threshold | Result |
 |---|---|---|---|
-| MSE | 0.027392 | <= 0.05 | PASS |
-| MAE | 0.135071 | <= 0.05 | FAIL |
+| MSE | 0.018410 | <= 0.05 | PASS |
+| MAE | 0.110304 | <= 0.05 | FAIL |
 
 **Compliance (MSE AND MAE):** FAILED
 
@@ -19,10 +19,10 @@ Dataset: 1233 objects (863 train / 184 val / 186 test)
 
 | Metric | Value | Threshold | Result |
 |---|---|---|---|
-| Precision | 0.5766 | >= 0.85 | FAIL |
-| Recall | 0.5699 | >= 0.8 | FAIL |
-| F1 | 0.5723 | >= 0.82 | FAIL |
-| OOB error | 0.4241 | -- | -- |
+| Precision | 0.6316 | >= 0.85 | FAIL |
+| Recall | 0.6183 | >= 0.8 | FAIL |
+| F1 | 0.6223 | >= 0.82 | FAIL |
+| OOB error | 0.4090 | -- | -- |
 
 **Compliance (P AND R AND F1):** FAILED
 
@@ -30,22 +30,22 @@ Dataset: 1233 objects (863 train / 184 val / 186 test)
 
 | Class | Precision | Recall | F1 |
 |---|---|---|---|
-| Safe | 0.5439 | 0.6078 | 0.5741 |
-| Watch | 0.6731 | 0.6306 | 0.6512 |
-| Critical | 0.2000 | 0.2083 | 0.2041 |
+| Safe | 0.5692 | 0.6727 | 0.6167 |
+| Watch | 0.7228 | 0.6460 | 0.6822 |
+| Critical | 0.2500 | 0.2778 | 0.2632 |
 
 ### RF feature importances
 
 | Feature | Importance |
 |---|---|
-| pairwise_rel_velocity_km_s | 0.1725 |
-| shell_density | 0.1530 |
-| inclination_deg | 0.1508 |
-| perigee_alt_km | 0.1369 |
-| apogee_alt_km | 0.1342 |
-| rel_velocity_km_s | 0.1305 |
-| eccentricity | 0.1221 |
+| pairwise_rel_velocity_km_s | 0.1818 |
+| shell_density | 0.1510 |
+| apogee_alt_km | 0.1400 |
+| perigee_alt_km | 0.1354 |
+| rel_velocity_km_s | 0.1349 |
+| eccentricity | 0.1305 |
+| inclination_deg | 0.1263 |
 
 ## Summary
 
-Under non-circular features and labels, neither model met its compliance thresholds: GRU passed MSE (0.0274 <= 0.05) but failed MAE (0.1351 > 0.05); RF failed all three classification thresholds (P=0.58, R=0.57, F1=0.57), with the Critical class (smallest, hardest) performing worst (F1=0.20). RF's feature importances are now evenly distributed (0.14-0.18 each) rather than dominated by a single circular feature, consistent with a model learning a genuinely harder task after label-leakage removal.
+Under non-circular features and labels, neither model met its compliance thresholds: GRU passed MSE (0.0184 <= 0.05) but failed MAE (0.1103 > 0.05); RF failed all three classification thresholds (P=0.63, R=0.62, F1=0.62), with the Critical class (smallest, hardest) performing worst (F1=0.26). RF's feature importances are now evenly distributed (0.14-0.18 each) rather than dominated by a single circular feature, consistent with a model learning a genuinely harder task after label-leakage removal.
