@@ -104,7 +104,7 @@ export default function GRUDiagnosticsPanel({ gru, split, accepted, acceptanceRe
             </span>
             <span className="mono">MSE {gru.mse.toFixed(6)} ≤ threshold {(gru.mse_threshold ?? 0.05).toFixed(6)}</span>
           </div>
-          <div className="diag-accept__or">OR</div>
+          <div className="diag-accept__or">AND</div>
           <div className="diag-accept__rule">
             <span className={maeRule ? "diag-accept__check--pass" : "diag-accept__check--fail"}>
               {maeRule ? "✓" : "✗"}

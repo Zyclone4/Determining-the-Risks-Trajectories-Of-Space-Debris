@@ -557,7 +557,7 @@ def train_random_forest(train_feats, test_feats):
 
     oob_error = round(1 - clf.oob_score_, 6)
 
-    # ── Acceptance (OR logic) ──────────────────────────────────────────────────
+    # ── Acceptance (AND logic: all three metrics must pass) ────────────────────
     reasons = []
     if prec_w >= RF_PRECISION_THR:
         reasons.append(f"Precision {prec_w:.4f} >= {RF_PRECISION_THR}")
@@ -565,7 +565,7 @@ def train_random_forest(train_feats, test_feats):
         reasons.append(f"Recall {rec_w:.4f} >= {RF_RECALL_THR}")
     if f1_w >= RF_F1_THR:
         reasons.append(f"F1 {f1_w:.4f} >= {RF_F1_THR}")
-    accepted = len(reasons) > 0
+    accepted = (prec_w >= RF_PRECISION_THR) and (rec_w >= RF_RECALL_THR) and (f1_w >= RF_F1_THR)
     acceptance_reason = "; ".join(reasons) if reasons else "All conditions failed"
 
     logger.info("RF results: P=%.4f R=%.4f F1=%.4f OOB=%.4f → %s",

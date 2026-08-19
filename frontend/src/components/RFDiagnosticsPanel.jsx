@@ -74,14 +74,14 @@ export default function RFDiagnosticsPanel({ rf, split, accepted, acceptanceReas
             </span>
             <span className="mono">Precision {(rf.precision ?? 0).toFixed(4)} ≥ 0.85</span>
           </div>
-          <div className="diag-accept__or">OR</div>
+          <div className="diag-accept__or">AND</div>
           <div className="diag-accept__rule">
             <span className={recRule ? "diag-accept__check--pass" : "diag-accept__check--fail"}>
               {recRule ? "✓" : "✗"}
             </span>
             <span className="mono">Recall {(rf.recall ?? 0).toFixed(4)} ≥ 0.80</span>
           </div>
-          <div className="diag-accept__or">OR</div>
+          <div className="diag-accept__or">AND</div>
           <div className="diag-accept__rule">
             <span className={f1Rule ? "diag-accept__check--pass" : "diag-accept__check--fail"}>
               {f1Rule ? "✓" : "✗"}
