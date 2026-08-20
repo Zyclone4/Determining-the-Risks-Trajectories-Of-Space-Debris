@@ -643,6 +643,33 @@ def _nearest_approach_kdtree(all_pos, all_vel):
         )
     min_dist[min_dist >= 1e50] = np.nan
     return min_dist, min_dist_step, min_dist_partner, min_dist_delta_vel
+def _knn_congestion_at_t0(all_pos, k_min=3, k_max=5):
+    """
+    Mean distance to the k_min-th through k_max-th nearest neighbors,
+    evaluated at a FIXED reference time (t=0), not at the window-minimum
+    used to build refined_nearest_approach (the label basis).
+
+    Deliberately decorrelated from the label in two ways:
+    (1) present-moment spacing at t0 does not determine whether orbits
+        converge later in the 48h window, and
+    (2) using the 3rd-5th nearest neighbor (not the single nearest)
+        avoids directly encoding the specific closest-approach event
+        the label is built on.
+    """
+    n_obj = all_pos.shape[0]
+    congestion = np.full(n_obj, np.nan)
+    pts = all_pos[:, 0, :]
+    valid_mask = ~np.any(np.isnan(pts), axis=1)
+    n_valid = valid_mask.sum()
+    k_query = k_max + 1
+    if n_valid <= k_query:
+        return congestion
+    valid_idx = np.where(valid_mask)[0]
+    tree = cKDTree(pts[valid_mask])
+    dd, _ = tree.query(pts[valid_mask], k=k_query)
+    mean_knn_dist = dd[:, k_min:k_max + 1].mean(axis=1)
+    congestion[valid_idx] = mean_knn_dist
+    return congestion
 def _shell_density(mean_alt, band_km=SHELL_BAND_KM):
     sorted_alt = np.sort(mean_alt[~np.isnan(mean_alt)])
     density = np.zeros(len(mean_alt), dtype=np.int32)
@@ -688,6 +715,9 @@ def compute_features(records, norad_ids, all_pos, all_vel):
 
     logger.info("Computing nearest approach via KD-Tree (%d steps)...", n_steps)
     nearest_approach_all, nearest_approach_step, nearest_approach_partner, nearest_approach_delta_vel = _nearest_approach_kdtree(all_pos, all_vel)
+
+    logger.info("Computing k-NN congestion at t0 (k=3-5, fixed reference time)...")
+    knn_congestion_t0 = _knn_congestion_at_t0(all_pos)
 
     # Initialize pairwise TCA features
     n_debris = len(debris_idx)
@@ -748,6 +778,7 @@ def compute_features(records, norad_ids, all_pos, all_vel):
     "nearest_approach_step": nearest_approach_step,
     "nearest_approach_delta_vel": nearest_approach_delta_vel,
     "nearest_approach_partner": nearest_approach_partner,
+    "knn_congestion_t0": knn_congestion_t0,
     "min_miss": min_miss,
     "min_altitude": min_altitude,
     "shell_density": shell_density_all,
@@ -789,6 +820,7 @@ def build_and_save_dataset(
 
     feat = compute_features(records, norad_ids, all_pos, all_vel)
     nearest_approach = feat["nearest_approach"]
+    knn_congestion_t0 = feat["knn_congestion_t0"]
     nearest_approach_step = feat["nearest_approach_step"]
     nearest_approach_delta_vel = feat["nearest_approach_delta_vel"]
     nearest_approach_partner_idx = feat["nearest_approach_partner"]
@@ -863,6 +895,7 @@ def build_and_save_dataset(
         "VZ": vel_flat[:, 2],
         "altitude": alt_flat,
         "nearest_approach": np.repeat(nearest_approach, n_steps),
+        "knn_congestion_t0": np.repeat(knn_congestion_t0, n_steps),
         "refined_nearest_approach": np.repeat(refined_nearest_approach, n_steps),
         "physics_risk_score": np.repeat(risk_score, n_steps),
         "relative_velocity_km_s": np.repeat(rel_vel_magnitude, n_steps),

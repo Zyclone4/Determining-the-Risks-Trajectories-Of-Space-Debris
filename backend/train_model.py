@@ -101,8 +101,8 @@ GRU_MAE_THR = 0.05
 
 RF_FEATURES = [
     "perigee_alt_km", "apogee_alt_km", "inclination_deg",
-    "rel_velocity_km_s", "shell_density", "eccentricity",
-    "pairwise_rel_velocity_km_s",
+    "own_speed_km_s", "shell_density", "eccentricity",
+    "pairwise_rel_velocity_km_s", "knn_congestion_t0",
 ]
 RF_PRECISION_THR = 0.85
 RF_RECALL_THR = 0.80
@@ -463,15 +463,22 @@ def extract_rf_features(df):
         # correlates ~0.62 with the label basis and was excluded for that reason)
         pairwise_rel_vel = float(obj["relative_velocity_km_s"].iloc[0]) if "relative_velocity_km_s" in obj.columns else 0.0
 
+        # Mean distance to 3rd-5th nearest neighbor at a FIXED reference time (t0),
+        # not the window-minimum used for the label. Correlates only 0.121 with
+        # refined_nearest_approach (vs 0.62 for nearest_active) -- verified safe
+        # per professor's suggested leakage check before adding.
+        knn_congestion = float(obj["knn_congestion_t0"].iloc[0]) if "knn_congestion_t0" in obj.columns else float("nan")
+
         records.append({
             "NORAD_CAT_ID": nid,
             "perigee_alt_km": perigee,
             "apogee_alt_km": apogee,
             "inclination_deg": inc,
-            "rel_velocity_km_s": rel_velocity,
+            "own_speed_km_s": rel_velocity,  # magnitude of this object's own orbital velocity, NOT relative to another object
             "shell_density": sd,
             "eccentricity": ecc,
             "pairwise_rel_velocity_km_s": pairwise_rel_vel,
+            "knn_congestion_t0": knn_congestion,
         })
 
     logger.info("Extracted RF features for %d objects", len(records))
