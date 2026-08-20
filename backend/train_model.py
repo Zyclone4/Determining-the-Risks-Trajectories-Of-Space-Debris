@@ -42,6 +42,7 @@ from torch.utils.data import Dataset, DataLoader
 
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import precision_recall_fscore_support
+from sklearn.inspection import permutation_importance
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +103,15 @@ GRU_MAE_THR = 0.05
 RF_FEATURES = [
     "perigee_alt_km", "apogee_alt_km", "inclination_deg",
     "own_speed_km_s", "shell_density", "eccentricity",
-    "pairwise_rel_velocity_km_s", "knn_congestion_t0",
+    "pairwise_rel_velocity_km_s",
+    # knn_congestion_t0 deliberately excluded: passed the correlation leakage
+    # check (0.121 vs refined_nearest_approach, well below the 0.62 that got
+    # nearest_active excluded), but permutation importance on the real
+    # split_by_object split was consistently negative across 5 seeds
+    # (-0.008 to -0.016), meaning it does not help -- and mildly hurts --
+    # held-out predictive performance. Kept in extract_rf_features() and the
+    # underlying data_pipeline.py column (knn_congestion_t0) for reference
+    # and reproducibility, but not used as an active RF input.
 ]
 RF_PRECISION_THR = 0.85
 RF_RECALL_THR = 0.80
@@ -562,6 +571,17 @@ def train_random_forest(train_feats, test_feats):
         for feat, imp in zip(RF_FEATURES, clf.feature_importances_)
     }
 
+    # Permutation importance (post-fit on held-out test set; shuffles each
+    # feature and measures the resulting drop in F1 -- more trustworthy than
+    # Gini importance since it reflects actual held-out predictive contribution)
+    perm_result = permutation_importance(
+        clf, X_test, y_test, n_repeats=50, random_state=42, scoring="f1_weighted"
+    )
+    permutation_importances = {
+        feat: round(float(imp), 6)
+        for feat, imp in zip(RF_FEATURES, perm_result.importances_mean)
+    }
+
     oob_error = round(1 - clf.oob_score_, 6)
 
     # ── Acceptance (AND logic: all three metrics must pass) ────────────────────
@@ -593,6 +613,7 @@ def train_random_forest(train_feats, test_feats):
         "f1": round(float(f1_w), 6),
         "per_class": per_class,
         "feature_importances": importances,
+        "permutation_importances": permutation_importances,
         "oob_error": oob_error,
         "oob_curve": oob_curve,
         "accepted": accepted,
@@ -624,6 +645,7 @@ def _save_artifacts(chosen, accepted, acceptance_reason, gru, rf, split_info):
             "f1": rf["f1"],
             "per_class": rf["per_class"],
             "feature_importances": rf["feature_importances"],
+            "permutation_importances": rf["permutation_importances"],
             "oob_error": rf["oob_error"],
             "accepted": rf["accepted"],
             "acceptance_reason": rf["acceptance_reason"],
@@ -666,6 +688,7 @@ def _save_artifacts(chosen, accepted, acceptance_reason, gru, rf, split_info):
             "f1_passed": rf["f1"] >= RF_F1_THR,
             "per_class": rf["per_class"],
             "feature_importances": rf["feature_importances"],
+            "permutation_importances": rf["permutation_importances"],
             "oob_error": rf["oob_error"],
             "oob_curve": rf["oob_curve"],
         }
